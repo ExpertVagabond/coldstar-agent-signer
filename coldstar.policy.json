@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "limits": { "perTxSol": 0.1, "dailySol": 0.5 },
+  "allowPrograms": [
+    "11111111111111111111111111111111",
+    "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"
+  ],
+  "allowRecipients": ["<recipient-allow pubkey — fill from setup>"],
+  "allowTokens": ["SOL"],
+  "blockRecipients": ["<recipient-bad pubkey — fill from setup>"],
+  "escalateAboveSol": 0.1
+}
