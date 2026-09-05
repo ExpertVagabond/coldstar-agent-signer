@@ -26,9 +26,41 @@ raw tx ──(adapter: @solana/kit parse)──▶ TxIntent ──(evaluate)─�
 | `coldstar.policy.json` | ✅ example policy (fill the pubkeys) |
 | `src/adapter/parseTx.ts` | ✅ decoder: decompiled message → `TxIntent`, fail-closed |
 | `src/adapter/parseTx.test.ts` | ✅ 17 unit tests incl. the fail-closed cases |
-| `src/signer/session.ts` | ⬜ TODO — cold-rooted session signer (AUTO_SIGN) |
-| `src/signer/escalate.ts` | ⬜ TODO — QR / air-gap hand-off (ESCALATE) |
-| `src/mcp/` | ⬜ TODO — expose as a ColdstarWallet / MCP tool for Solana Agent Kit |
+| `src/wallet/project.ts` | ✅ web3.js `Transaction`/`VersionedTransaction` → `DecompiledMessage`; fail-closed on lookup-table accounts |
+| `src/wallet/coldstarWallet.ts` | ✅ `ColdstarWallet` — drop-in for Solana Agent Kit's `BaseWallet` (structurally typed, no framework dependency) |
+| `src/wallet/coldstarWallet.test.ts` | ✅ 17 tests: the three decisions, daily cap, batch atomicity, fail-closed edges |
+| `src/signer/escalate.ts` | ⬜ TODO — QR / air-gap hand-off; today `onEscalate` is an injected handler |
+| `src/mcp/` | ⬜ TODO — MCP tool surface |
+
+## Use it from Solana Agent Kit
+
+`ColdstarWallet` implements the same five methods as the kit's `KeypairWallet`, so it is a one-line swap:
+
+```ts
+import { Keypair } from "@solana/web3.js";
+import { ColdstarWallet, ColdstarEscalation, ColdstarRejected } from "@coldstar/agent-signer";
+import policy from "./coldstar.policy.json";
+
+// The SESSION key. Disposable; authorised by the cold root's policy envelope.
+// The root key is never in this process.
+const session = Keypair.fromSecretKey(bs58.decode(process.env.COLDSTAR_SESSION_KEY!));
+
+const wallet = new ColdstarWallet({
+  policy,
+  session,
+  rpcUrl: process.env.RPC_URL!,
+  onEscalate: async (tx, reason) => {
+    // Hand the unsigned tx to the air-gapped device (QR) and return the signed
+    // tx if a human approves, or null to decline. Omit to make ESCALATE throw.
+    return null;
+  },
+  onDecision: (d) => console.log(d.decision, d.reason),
+});
+
+const agent = new SolanaAgentKit(wallet, process.env.RPC_URL!, {});
+```
+
+Every `signTransaction` / `signAllTransactions` / `signAndSendTransaction` call is projected, parsed, and evaluated first. `AUTO_SIGN` signs with the session key. `ESCALATE` calls `onEscalate`, and throws `ColdstarEscalation` (carrying the unsigned tx as base64 for the QR hand-off) if it declines. `REJECT` throws `ColdstarRejected` and no signature ever exists. Batches are atomic on rejection: if any transaction in `signAllTransactions` is rejected, none are signed. `signMessage` is refused unless `allowMessageSigning: true`, because off-chain signatures can authorise things the transaction policy never sees.
 
 ## The adapter is fail-closed, on purpose
 
