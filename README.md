@@ -35,6 +35,8 @@ raw tx ──(project + parseTx, fail-closed)──▶ TxIntent ──(evaluate)
 | `src/mcp/server.test.ts` | ✅ 10 tests over an in-memory MCP client |
 | `src/wallet/simulate.ts` | ✅ posture (b), opt-in: `rpcSimulator` measures the fee payer's debit; wallet takes max(static, simulated); failure escalates |
 | `src/wallet/simulate.test.ts` | ✅ 9 tests with an injected simulator |
+| `src/wallet/ledger.ts` | ✅ `FileSpendLedger` — the daily cap survives restarts; atomic writes, 0600, refuses to start from a corrupt file |
+| `src/wallet/ledger.test.ts` | ✅ 7 tests incl. cap-holds-across-wallet-restart |
 
 ## Use it from any MCP client (Claude, Cursor, …)
 
@@ -64,7 +66,7 @@ The same wallet as an MCP server. The model gets five tools and never a key; eve
 | `coldstar_sign_and_send` | As above, then broadcast if signed; an RPC failure returns `send_failed` with the reason instead of an error |
 | `coldstar_transfer_sol` | Build + evaluate + send a SOL transfer from the session wallet (`dry_run: true` for the verdict only) |
 
-`COLDSTAR_SESSION_KEYFILE` is a `solana-keygen`-style JSON byte array; `COLDSTAR_SESSION_KEY` (base58) also works. It is the **session** key. The root key has no environment variable because it never lives on this machine.
+The binary keeps the daily-spend ledger in `COLDSTAR_LEDGER` (default `./.coldstar-ledger.json`) so the cap survives restarts. `COLDSTAR_SESSION_KEYFILE` is a `solana-keygen`-style JSON byte array; `COLDSTAR_SESSION_KEY` (base58) also works. It is the **session** key. The root key has no environment variable because it never lives on this machine.
 
 ## Install
 
@@ -108,7 +110,7 @@ const wallet = new ColdstarWallet({
 const agent = new SolanaAgentKit(wallet, process.env.RPC_URL!, {});
 ```
 
-Every `signTransaction` / `signAllTransactions` / `signAndSendTransaction` call is projected, parsed, and evaluated first. `AUTO_SIGN` signs with the session key. `ESCALATE` calls `onEscalate`, and throws `ColdstarEscalation` (carrying the unsigned tx as base64 for the QR hand-off) if it declines. `REJECT` throws `ColdstarRejected` and no signature ever exists. Batches are atomic on rejection: if any transaction in `signAllTransactions` is rejected, none are signed. `signMessage` is refused unless `allowMessageSigning: true`, because off-chain signatures can authorise things the transaction policy never sees.
+Pass `ledger: new FileSpendLedger("/var/lib/coldstar/ledger.json")` so the daily cap survives a restart; the default in-memory ledger is for tests and throwaway sessions. Every `signTransaction` / `signAllTransactions` / `signAndSendTransaction` call is projected, parsed, and evaluated first. `AUTO_SIGN` signs with the session key. `ESCALATE` calls `onEscalate`, and throws `ColdstarEscalation` (carrying the unsigned tx as base64 for the QR hand-off) if it declines. `REJECT` throws `ColdstarRejected` and no signature ever exists. Batches are atomic on rejection: if any transaction in `signAllTransactions` is rejected, none are signed. `signMessage` is refused unless `allowMessageSigning: true`, because off-chain signatures can authorise things the transaction policy never sees.
 
 ## The adapter is fail-closed, on purpose
 

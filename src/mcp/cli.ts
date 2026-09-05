@@ -22,6 +22,7 @@
 //   COLDSTAR_SESSION_KEYFILE      path to a JSON byte-array keypair (solana-keygen format)
 //   COLDSTAR_SESSION_KEY          or the base58 secret key
 //   COLDSTAR_ALLOW_MESSAGE_SIGNING  "1" to enable off-chain message signing (off by default)
+//   COLDSTAR_LEDGER               path of the persistent daily-spend ledger (default ./.coldstar-ledger.json)
 //   COLDSTAR_SIMULATE             "1" to simulate txs through allowlisted non-System programs and
 //                                 apply the measured debit to the limits; "always" to simulate every tx
 //
@@ -34,6 +35,7 @@ import { Keypair } from "@solana/web3.js";
 import bs58 from "bs58";
 import { ColdstarWallet } from "../wallet/coldstarWallet.js";
 import { rpcSimulator } from "../wallet/simulate.js";
+import { FileSpendLedger } from "../wallet/ledger.js";
 import type { Policy } from "../policy/schema.js";
 import { createColdstarMcpServer } from "./server.js";
 
@@ -66,10 +68,13 @@ if (process.env.COLDSTAR_SESSION_KEYFILE) {
   fail("set COLDSTAR_SESSION_KEYFILE or COLDSTAR_SESSION_KEY (the session key, never the root)");
 }
 
+// The daily cap must survive restarts, so the MCP binary always uses a file ledger.
+const ledgerPath = process.env.COLDSTAR_LEDGER ?? ".coldstar-ledger.json";
 const wallet = new ColdstarWallet({
   policy,
   session,
   rpcUrl,
+  ledger: new FileSpendLedger(ledgerPath),
   allowMessageSigning: process.env.COLDSTAR_ALLOW_MESSAGE_SIGNING === "1",
   // COLDSTAR_SIMULATE=1 turns on simulation-based accounting for transactions
   // that touch allowlisted non-System programs (posture (b)); "always" simulates everything.
