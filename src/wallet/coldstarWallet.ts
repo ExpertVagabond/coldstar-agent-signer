@@ -264,7 +264,19 @@ function serializeUnsigned(tx: SolanaTx): string {
   const bytes = isVersionedTransaction(tx)
     ? tx.serialize()
     : tx.serialize({ requireAllSignatures: false, verifySignatures: false });
-  let bin = "";
-  for (const b of bytes) bin += String.fromCharCode(b);
-  return btoa(bin);
+  return base64(bytes);
+}
+
+// Dependency-free base64 so this file needs neither Node's Buffer nor the DOM lib.
+const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+function base64(bytes: Uint8Array): string {
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 3) {
+    const a = bytes[i] as number, b = bytes[i + 1], c = bytes[i + 2];
+    const n = (a << 16) | ((b ?? 0) << 8) | (c ?? 0);
+    out += B64.charAt((n >> 18) & 63) + B64.charAt((n >> 12) & 63);
+    out += b === undefined ? "=" : B64.charAt((n >> 6) & 63);
+    out += c === undefined ? "=" : B64.charAt(n & 63);
+  }
+  return out;
 }
