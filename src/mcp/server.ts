@@ -158,7 +158,7 @@ export function createColdstarMcpServer(opts: McpServerOptions): McpServer {
       },
     },
     async ({ transaction_base64 }) => {
-      const v = wallet.verdict(deserialize(transaction_base64));
+      const v = await wallet.evaluateTx(deserialize(transaction_base64));
       return text({ decision: v.decision, reason: v.reason, out_sol: v.intent?.outSol, recipients: v.intent?.recipients });
     },
   );
@@ -220,7 +220,7 @@ export function createColdstarMcpServer(opts: McpServerOptions): McpServer {
       }).compileToLegacyMessage();
       const tx = new VersionedTransaction(msg);
       if (dry_run) {
-        const v = wallet.verdict(tx);
+        const v = await wallet.evaluateTx(tx);
         const status = v.decision === "AUTO_SIGN" ? "signed" : v.decision === "ESCALATE" ? "escalated" : "rejected";
         return text({ decision: v.decision, status, reason: `dry run: ${v.reason}` });
       }

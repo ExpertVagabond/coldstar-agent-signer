@@ -22,6 +22,8 @@
 //   COLDSTAR_SESSION_KEYFILE      path to a JSON byte-array keypair (solana-keygen format)
 //   COLDSTAR_SESSION_KEY          or the base58 secret key
 //   COLDSTAR_ALLOW_MESSAGE_SIGNING  "1" to enable off-chain message signing (off by default)
+//   COLDSTAR_SIMULATE             "1" to simulate txs through allowlisted non-System programs and
+//                                 apply the measured debit to the limits; "always" to simulate every tx
 //
 // The session key is the disposable key the cold root authorised. It is NOT
 // the root key; the root never lives on a networked machine.
@@ -31,6 +33,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { Keypair } from "@solana/web3.js";
 import bs58 from "bs58";
 import { ColdstarWallet } from "../wallet/coldstarWallet.js";
+import { rpcSimulator } from "../wallet/simulate.js";
 import type { Policy } from "../policy/schema.js";
 import { createColdstarMcpServer } from "./server.js";
 
@@ -68,6 +71,11 @@ const wallet = new ColdstarWallet({
   session,
   rpcUrl,
   allowMessageSigning: process.env.COLDSTAR_ALLOW_MESSAGE_SIGNING === "1",
+  // COLDSTAR_SIMULATE=1 turns on simulation-based accounting for transactions
+  // that touch allowlisted non-System programs (posture (b)); "always" simulates everything.
+  ...(process.env.COLDSTAR_SIMULATE
+    ? { preflight: { simulate: rpcSimulator(rpcUrl), when: process.env.COLDSTAR_SIMULATE === "always" ? "always" as const : "opaque" as const } }
+    : {}),
   onDecision: (v) => process.stderr.write(`[coldstar] ${v.decision} ${v.intent?.outSol ?? "?"} SOL — ${v.reason}\n`),
 });
 

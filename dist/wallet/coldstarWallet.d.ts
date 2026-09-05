@@ -1,5 +1,6 @@
-import { type Keypair, type PublicKey, type SendOptions, type Transaction, type TransactionSignature, type VersionedTransaction } from "@solana/web3.js";
+import { type Keypair, type PublicKey, type SendOptions, type Transaction, type TransactionSignature, VersionedTransaction } from "@solana/web3.js";
 import type { Decision, EvalState, Policy, TxIntent } from "../policy/schema.js";
+import type { Simulator } from "./simulate.js";
 export type SolanaTx = Transaction | VersionedTransaction;
 /** Structural copy of Solana Agent Kit's BaseWallet — no import needed. */
 export interface BaseWalletLike {
@@ -71,6 +72,20 @@ export interface ColdstarWalletOptions {
     allowMessageSigning?: boolean;
     /** Observability hook — every decision, including AUTO_SIGN. */
     onDecision?: (d: Verdict) => void;
+    /**
+     * Posture (b): simulation-based accounting. A transaction through an
+     * allowlisted non-System program (a Jupiter swap, say) cannot be statically
+     * decoded to a SOL amount, so by default the program allowlist is the only
+     * control. With a simulator configured, the fee payer's simulated debit is
+     * measured and the LARGER of the static and simulated amounts is what the
+     * limits and daily cap see. Simulation failure escalates (fail-closed).
+     *   when: "opaque" (default) simulates only when a non-System program is
+     *         present; "always" simulates every transaction.
+     */
+    preflight?: {
+        simulate: Simulator;
+        when?: "opaque" | "always";
+    };
 }
 /** What the wallet decided for one transaction, before any signing happens. */
 export interface Verdict {
@@ -88,6 +103,7 @@ export declare class ColdstarWallet implements BaseWalletLike {
     private readonly onEscalate;
     private readonly allowMessageSigning;
     private readonly onDecision;
+    private readonly preflight;
     constructor(opts: ColdstarWalletOptions);
     /**
      * Evaluate without signing. Pure with respect to the ledger (reads only).
@@ -96,6 +112,13 @@ export declare class ColdstarWallet implements BaseWalletLike {
     verdict(tx: SolanaTx, extraSpendSol?: number): Verdict;
     /** SOL signed so far in the current UTC day, per the ledger. */
     dailySpentSol(): number;
+    /**
+     * The full evaluation `sign*` uses: the static verdict, plus simulation-based
+     * accounting when `preflight` is configured. The returned intent carries the
+     * EFFECTIVE outSol (max of static and simulated), which is what the ledger
+     * records on AUTO_SIGN.
+     */
+    evaluateTx(tx: SolanaTx, extraSpendSol?: number): Promise<Verdict>;
     signTransaction<T extends SolanaTx>(transaction: T): Promise<T>;
     /**
      * Batch semantics: every transaction is evaluated first, with the daily cap

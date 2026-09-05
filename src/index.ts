@@ -11,6 +11,8 @@ export {
   InMemorySpendLedger,
 } from "./wallet/coldstarWallet.js";
 export { createColdstarMcpServer } from "./mcp/server.js";
+export { rpcSimulator } from "./wallet/simulate.js";
+export type { Simulator, SimulationResult } from "./wallet/simulate.js";
 export type { McpServerOptions } from "./mcp/server.js";
 export {
   declineEscalation,

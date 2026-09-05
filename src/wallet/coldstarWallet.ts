@@ -25,13 +25,16 @@ import {
   type SendOptions,
   type Transaction,
   type TransactionSignature,
-  type VersionedTransaction,
+  VersionedTransaction,
 } from "@solana/web3.js";
+import { LAMPORTS_PER_SOL } from "../policy/schema.js";
 import nacl from "tweetnacl";
 import { evaluate } from "../policy/evaluate.js";
 import type { Decision, EvalState, Policy, TxIntent } from "../policy/schema.js";
 import { parseTx } from "../adapter/parseTx.js";
 import { isVersionedTransaction, projectTransaction } from "./project.js";
+import { SYSTEM_PROGRAM_ID } from "../adapter/parseTx.js";
+import type { Simulator } from "./simulate.js";
 
 export type SolanaTx = Transaction | VersionedTransaction;
 
@@ -133,6 +136,17 @@ export interface ColdstarWalletOptions {
   allowMessageSigning?: boolean;
   /** Observability hook — every decision, including AUTO_SIGN. */
   onDecision?: (d: Verdict) => void;
+  /**
+   * Posture (b): simulation-based accounting. A transaction through an
+   * allowlisted non-System program (a Jupiter swap, say) cannot be statically
+   * decoded to a SOL amount, so by default the program allowlist is the only
+   * control. With a simulator configured, the fee payer's simulated debit is
+   * measured and the LARGER of the static and simulated amounts is what the
+   * limits and daily cap see. Simulation failure escalates (fail-closed).
+   *   when: "opaque" (default) simulates only when a non-System program is
+   *         present; "always" simulates every transaction.
+   */
+  preflight?: { simulate: Simulator; when?: "opaque" | "always" };
 }
 
 /** What the wallet decided for one transaction, before any signing happens. */
@@ -152,6 +166,7 @@ export class ColdstarWallet implements BaseWalletLike {
   private readonly onEscalate: EscalationHandler;
   private readonly allowMessageSigning: boolean;
   private readonly onDecision: ColdstarWalletOptions["onDecision"];
+  private readonly preflight: ColdstarWalletOptions["preflight"];
 
   constructor(opts: ColdstarWalletOptions) {
     this.policy = opts.policy;
@@ -162,6 +177,7 @@ export class ColdstarWallet implements BaseWalletLike {
     this.onEscalate = opts.onEscalate ?? defaultEscalate;
     this.allowMessageSigning = opts.allowMessageSigning ?? false;
     this.onDecision = opts.onDecision;
+    this.preflight = opts.preflight;
   }
 
   /**
@@ -185,6 +201,34 @@ export class ColdstarWallet implements BaseWalletLike {
     return this.ledger.get().dailySpentSol;
   }
 
+  /**
+   * The full evaluation `sign*` uses: the static verdict, plus simulation-based
+   * accounting when `preflight` is configured. The returned intent carries the
+   * EFFECTIVE outSol (max of static and simulated), which is what the ledger
+   * records on AUTO_SIGN.
+   */
+  async evaluateTx(tx: SolanaTx, extraSpendSol = 0): Promise<Verdict> {
+    const v = this.verdict(tx, extraSpendSol);
+    if (!this.preflight || v.decision === "REJECT" || !v.intent) return v;
+    const opaque = v.intent.instructions.some((ix) => ix.programId !== SYSTEM_PROGRAM_ID);
+    if ((this.preflight.when ?? "opaque") === "opaque" && !opaque) return v;
+
+    const vtx = isVersionedTransaction(tx) ? tx : new VersionedTransaction(tx.compileMessage());
+    const sim = await this.preflight.simulate(vtx, this.publicKey).catch((e: unknown) => ({
+      ok: false as const,
+      reason: `simulator threw: ${(e as Error).message ?? String(e)}`,
+    }));
+    if (!sim.ok) {
+      return { decision: "ESCALATE", reason: `simulation failed: ${sim.reason}`, intent: v.intent };
+    }
+    const simulatedSol = Number(sim.debitLamports) / LAMPORTS_PER_SOL;
+    if (simulatedSol <= v.intent.outSol) return v; // static accounting already covers it
+    const intent: TxIntent = { ...v.intent, outSol: simulatedSol };
+    const state = this.ledger.get();
+    const r = evaluate(intent, this.policy, { dailySpentSol: state.dailySpentSol + extraSpendSol });
+    return { decision: r.decision, reason: `${r.reason} (simulated debit ${simulatedSol} SOL)`, intent };
+  }
+
   async signTransaction<T extends SolanaTx>(transaction: T): Promise<T> {
     const [signed] = await this.signAllTransactions([transaction]);
     return signed as T;
@@ -199,7 +243,7 @@ export class ColdstarWallet implements BaseWalletLike {
     const verdicts: Verdict[] = [];
     let pending = 0;
     for (const tx of transactions) {
-      const v = this.verdict(tx, pending);
+      const v = await this.evaluateTx(tx, pending);
       verdicts.push(v);
       if (v.decision === "AUTO_SIGN") pending += v.intent?.outSol ?? 0;
     }

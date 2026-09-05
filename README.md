@@ -33,6 +33,8 @@ raw tx ──(project + parseTx, fail-closed)──▶ TxIntent ──(evaluate)
 | `src/mcp/server.ts` | ✅ MCP server: `coldstar_status`, `coldstar_verdict`, `coldstar_sign`, `coldstar_sign_and_send`, `coldstar_transfer_sol` |
 | `src/mcp/cli.ts` | ✅ `coldstar-signer-mcp` stdio binary, configured by env |
 | `src/mcp/server.test.ts` | ✅ 10 tests over an in-memory MCP client |
+| `src/wallet/simulate.ts` | ✅ posture (b), opt-in: `rpcSimulator` measures the fee payer's debit; wallet takes max(static, simulated); failure escalates |
+| `src/wallet/simulate.test.ts` | ✅ 9 tests with an injected simulator |
 
 ## Use it from any MCP client (Claude, Cursor, …)
 
@@ -76,7 +78,7 @@ npm install github:ExpertVagabond/coldstar-agent-signer @solana/web3.js tweetnac
 
 ### Posture on non-System programs (read this)
 
-A swap through an allowlisted program such as Jupiter cannot be statically decoded to a SOL amount; the real number depends on routing and on-chain state. This release ships **posture (a): trust the program allowlist.** Allowlisting a program means "I accept that this program can move funds within its own logic." Per-transaction and daily caps therefore bound bare SOL transfers, not what an allowlisted program does internally. Keep `allowPrograms` short. Simulation-based accounting is the planned upgrade before this is recommended for mainnet; the decision seam is documented at `classifyOpaqueProgram` in `src/adapter/parseTx.ts`.
+A swap through an allowlisted program such as Jupiter cannot be statically decoded to a SOL amount; the real number depends on routing and on-chain state. This release ships **posture (a): trust the program allowlist.** Allowlisting a program means "I accept that this program can move funds within its own logic." Per-transaction and daily caps therefore bound bare SOL transfers, not what an allowlisted program does internally. Keep `allowPrograms` short. **Posture (b) is available opt-in:** pass `preflight: { simulate: rpcSimulator(rpcUrl) }` to `ColdstarWallet` (or set `COLDSTAR_SIMULATE=1` for the MCP binary) and any transaction touching a non-System program is simulated first; the fee payer's measured debit is applied to the per-transaction limit, escalate threshold, and daily cap when it exceeds the static figure, and a failed simulation escalates. Simulation can still diverge from execution, so this narrows the gap rather than closing it. The decision seam is documented at `classifyOpaqueProgram` in `src/adapter/parseTx.ts`.
 
 ## Use it from Solana Agent Kit
 

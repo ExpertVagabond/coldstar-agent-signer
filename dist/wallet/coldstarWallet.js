@@ -17,11 +17,13 @@
 // Nothing here imports Solana Agent Kit. The interface is copied structurally
 // so this package has no dependency on the framework and works with any
 // caller that speaks web3.js transactions.
-import { Connection, } from "@solana/web3.js";
+import { Connection, VersionedTransaction, } from "@solana/web3.js";
+import { LAMPORTS_PER_SOL } from "../policy/schema.js";
 import nacl from "tweetnacl";
 import { evaluate } from "../policy/evaluate.js";
 import { parseTx } from "../adapter/parseTx.js";
 import { isVersionedTransaction, projectTransaction } from "./project.js";
+import { SYSTEM_PROGRAM_ID } from "../adapter/parseTx.js";
 export class InMemorySpendLedger {
     now;
     day = utcDay();
@@ -83,6 +85,7 @@ export class ColdstarWallet {
     onEscalate;
     allowMessageSigning;
     onDecision;
+    preflight;
     constructor(opts) {
         this.policy = opts.policy;
         this.session = opts.session;
@@ -92,6 +95,7 @@ export class ColdstarWallet {
         this.onEscalate = opts.onEscalate ?? defaultEscalate;
         this.allowMessageSigning = opts.allowMessageSigning ?? false;
         this.onDecision = opts.onDecision;
+        this.preflight = opts.preflight;
     }
     /**
      * Evaluate without signing. Pure with respect to the ledger (reads only).
@@ -114,6 +118,35 @@ export class ColdstarWallet {
     dailySpentSol() {
         return this.ledger.get().dailySpentSol;
     }
+    /**
+     * The full evaluation `sign*` uses: the static verdict, plus simulation-based
+     * accounting when `preflight` is configured. The returned intent carries the
+     * EFFECTIVE outSol (max of static and simulated), which is what the ledger
+     * records on AUTO_SIGN.
+     */
+    async evaluateTx(tx, extraSpendSol = 0) {
+        const v = this.verdict(tx, extraSpendSol);
+        if (!this.preflight || v.decision === "REJECT" || !v.intent)
+            return v;
+        const opaque = v.intent.instructions.some((ix) => ix.programId !== SYSTEM_PROGRAM_ID);
+        if ((this.preflight.when ?? "opaque") === "opaque" && !opaque)
+            return v;
+        const vtx = isVersionedTransaction(tx) ? tx : new VersionedTransaction(tx.compileMessage());
+        const sim = await this.preflight.simulate(vtx, this.publicKey).catch((e) => ({
+            ok: false,
+            reason: `simulator threw: ${e.message ?? String(e)}`,
+        }));
+        if (!sim.ok) {
+            return { decision: "ESCALATE", reason: `simulation failed: ${sim.reason}`, intent: v.intent };
+        }
+        const simulatedSol = Number(sim.debitLamports) / LAMPORTS_PER_SOL;
+        if (simulatedSol <= v.intent.outSol)
+            return v; // static accounting already covers it
+        const intent = { ...v.intent, outSol: simulatedSol };
+        const state = this.ledger.get();
+        const r = evaluate(intent, this.policy, { dailySpentSol: state.dailySpentSol + extraSpendSol });
+        return { decision: r.decision, reason: `${r.reason} (simulated debit ${simulatedSol} SOL)`, intent };
+    }
     async signTransaction(transaction) {
         const [signed] = await this.signAllTransactions([transaction]);
         return signed;
@@ -127,7 +160,7 @@ export class ColdstarWallet {
         const verdicts = [];
         let pending = 0;
         for (const tx of transactions) {
-            const v = this.verdict(tx, pending);
+            const v = await this.evaluateTx(tx, pending);
             verdicts.push(v);
             if (v.decision === "AUTO_SIGN")
                 pending += v.intent?.outSol ?? 0;

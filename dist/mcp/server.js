@@ -121,7 +121,7 @@ export function createColdstarMcpServer(opts) {
             recipients: z.array(z.string()).optional(),
         },
     }, async ({ transaction_base64 }) => {
-        const v = wallet.verdict(deserialize(transaction_base64));
+        const v = await wallet.evaluateTx(deserialize(transaction_base64));
         return text({ decision: v.decision, reason: v.reason, out_sol: v.intent?.outSol, recipients: v.intent?.recipients });
     });
     server.registerTool("coldstar_sign", {
@@ -166,7 +166,7 @@ export function createColdstarMcpServer(opts) {
         }).compileToLegacyMessage();
         const tx = new VersionedTransaction(msg);
         if (dry_run) {
-            const v = wallet.verdict(tx);
+            const v = await wallet.evaluateTx(tx);
             const status = v.decision === "AUTO_SIGN" ? "signed" : v.decision === "ESCALATE" ? "escalated" : "rejected";
             return text({ decision: v.decision, status, reason: `dry run: ${v.reason}` });
         }
