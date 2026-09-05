@@ -110,6 +110,10 @@ export class ColdstarWallet {
         });
         return { decision: r.decision, reason: r.reason, intent: parsed.intent };
     }
+    /** SOL signed so far in the current UTC day, per the ledger. */
+    dailySpentSol() {
+        return this.ledger.get().dailySpentSol;
+    }
     async signTransaction(transaction) {
         const [signed] = await this.signAllTransactions([transaction]);
         return signed;

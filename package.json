@@ -27,6 +27,9 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "coldstar-signer-mcp": "./dist/mcp/cli.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -53,12 +56,18 @@
     "prepublishOnly": "npm run typecheck && npm test && npm run build",
     "prepare": "npm run build"
   },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "bs58": "^6.0.0",
+    "zod": "^3.25.0"
+  },
   "peerDependencies": {
     "@solana/web3.js": "^1.95.0",
     "tweetnacl": "^1.0.3"
   },
   "devDependencies": {
     "@solana/web3.js": "^1.98.4",
+    "@types/node": "^22.20.1",
     "tweetnacl": "^1.0.3",
     "typescript": "^5.5.0",
     "vitest": "^2.0.0"

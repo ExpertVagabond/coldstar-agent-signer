@@ -29,8 +29,40 @@ raw tx ──(adapter: @solana/kit parse)──▶ TxIntent ──(evaluate)─�
 | `src/wallet/project.ts` | ✅ web3.js `Transaction`/`VersionedTransaction` → `DecompiledMessage`; fail-closed on lookup-table accounts |
 | `src/wallet/coldstarWallet.ts` | ✅ `ColdstarWallet` — drop-in for Solana Agent Kit's `BaseWallet` (structurally typed, no framework dependency) |
 | `src/wallet/coldstarWallet.test.ts` | ✅ 17 tests: the three decisions, daily cap, batch atomicity, fail-closed edges |
-| `src/signer/escalate.ts` | ⬜ TODO — QR / air-gap hand-off; today `onEscalate` is an injected handler |
-| `src/mcp/` | ⬜ TODO — MCP tool surface |
+| `src/signer/escalate.ts` | ✅ `declineEscalation`, `terminalEscalation` (paste-back with same-message verification), `acceptSignedResponse` |
+| `src/mcp/server.ts` | ✅ MCP server: `coldstar_status`, `coldstar_verdict`, `coldstar_sign`, `coldstar_sign_and_send`, `coldstar_transfer_sol` |
+| `src/mcp/cli.ts` | ✅ `coldstar-signer-mcp` stdio binary, configured by env |
+| `src/mcp/server.test.ts` | ✅ 9 tests over an in-memory MCP client |
+
+## Use it from any MCP client (Claude, Cursor, …)
+
+The same wallet as an MCP server. The model gets five tools and never a key; every outcome is returned as data (`signed` / `escalated` / `rejected`), so an agent can read the reason and stop instead of retrying.
+
+```json
+{
+  "mcpServers": {
+    "coldstar": {
+      "command": "npx",
+      "args": ["-y", "github:ExpertVagabond/coldstar-agent-signer"],
+      "env": {
+        "RPC_URL": "https://api.devnet.solana.com",
+        "COLDSTAR_POLICY": "/abs/path/coldstar.policy.json",
+        "COLDSTAR_SESSION_KEYFILE": "/abs/path/session.json"
+      }
+    }
+  }
+}
+```
+
+| Tool | What it does |
+|---|---|
+| `coldstar_status` | Session address, the policy, today's spend against the daily cap |
+| `coldstar_verdict` | Evaluate a base64 transaction; returns AUTO_SIGN / ESCALATE / REJECT and why. Signs nothing. |
+| `coldstar_sign` | Sign under policy. `signed` returns the signed tx; `escalated` returns the unsigned tx for the air-gapped device; `rejected` returns no bytes at all. |
+| `coldstar_sign_and_send` | As above, then broadcast if signed |
+| `coldstar_transfer_sol` | Build + evaluate + send a SOL transfer from the session wallet (`dry_run: true` for the verdict only) |
+
+`COLDSTAR_SESSION_KEYFILE` is a `solana-keygen`-style JSON byte array; `COLDSTAR_SESSION_KEY` (base58) also works. It is the **session** key. The root key has no environment variable because it never lives on this machine.
 
 ## Install
 

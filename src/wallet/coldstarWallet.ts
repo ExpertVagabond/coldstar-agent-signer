@@ -180,6 +180,11 @@ export class ColdstarWallet implements BaseWalletLike {
     return { decision: r.decision, reason: r.reason, intent: parsed.intent };
   }
 
+  /** SOL signed so far in the current UTC day, per the ledger. */
+  dailySpentSol(): number {
+    return this.ledger.get().dailySpentSol;
+  }
+
   async signTransaction<T extends SolanaTx>(transaction: T): Promise<T> {
     const [signed] = await this.signAllTransactions([transaction]);
     return signed as T;

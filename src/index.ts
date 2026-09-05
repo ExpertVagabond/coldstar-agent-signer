@@ -10,6 +10,14 @@ export {
   ColdstarRejected,
   InMemorySpendLedger,
 } from "./wallet/coldstarWallet.js";
+export { createColdstarMcpServer } from "./mcp/server.js";
+export type { McpServerOptions } from "./mcp/server.js";
+export {
+  declineEscalation,
+  terminalEscalation,
+  acceptSignedResponse,
+  serializeUnsigned,
+} from "./signer/escalate.js";
 export type {
   BaseWalletLike,
   ColdstarWalletOptions,

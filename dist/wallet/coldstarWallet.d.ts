@@ -94,6 +94,8 @@ export declare class ColdstarWallet implements BaseWalletLike {
      * Exposed so an agent can pre-flight a plan and so tests can assert on it.
      */
     verdict(tx: SolanaTx, extraSpendSol?: number): Verdict;
+    /** SOL signed so far in the current UTC day, per the ledger. */
+    dailySpentSol(): number;
     signTransaction<T extends SolanaTx>(transaction: T): Promise<T>;
     /**
      * Batch semantics: every transaction is evaluated first, with the daily cap
