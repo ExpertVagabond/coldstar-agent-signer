@@ -1,0 +1,203 @@
+// Coldstar Agent-Safe Signing — the wallet an agent framework actually holds.
+//
+// `ColdstarWallet` is structurally compatible with Solana Agent Kit's
+// `BaseWallet` (publicKey, signTransaction, signAllTransactions,
+// signAndSendTransaction, sendTransaction, signMessage), so it drops in where
+// `KeypairWallet` would. The difference is what happens inside `sign*`:
+//
+//   tx ──project──▶ DecompiledMessage ──parseTx──▶ TxIntent ──evaluate──▶
+//        AUTO_SIGN  → sign with the SESSION key (never the root)
+//        ESCALATE   → hand the unsigned tx to the escalation handler (air-gap/QR);
+//                     default handler throws ColdstarEscalation — no signature
+//        REJECT     → throw ColdstarRejected — no signature, ever
+//
+// A parse or projection failure is treated as ESCALATE, per parseTx's contract:
+// "could not be accounted for" is not "safe".
+//
+// Nothing here imports Solana Agent Kit. The interface is copied structurally
+// so this package has no dependency on the framework and works with any
+// caller that speaks web3.js transactions.
+import { Connection, } from "@solana/web3.js";
+import nacl from "tweetnacl";
+import { evaluate } from "../policy/evaluate.js";
+import { parseTx } from "../adapter/parseTx.js";
+import { isVersionedTransaction, projectTransaction } from "./project.js";
+export class InMemorySpendLedger {
+    now;
+    day = utcDay();
+    spent = 0;
+    constructor(now = () => new Date()) {
+        this.now = now;
+    }
+    get() {
+        this.roll();
+        return { dailySpentSol: this.spent };
+    }
+    add(sol) {
+        this.roll();
+        this.spent += sol;
+    }
+    roll() {
+        const d = utcDay(this.now());
+        if (d !== this.day) {
+            this.day = d;
+            this.spent = 0;
+        }
+    }
+}
+function utcDay(d = new Date()) {
+    return d.toISOString().slice(0, 10);
+}
+export class ColdstarRejected extends Error {
+    reason;
+    intent;
+    name = "ColdstarRejected";
+    decision = "REJECT";
+    constructor(reason, intent) {
+        super(`Coldstar policy REJECT: ${reason}`);
+        this.reason = reason;
+        this.intent = intent;
+    }
+}
+export class ColdstarEscalation extends Error {
+    reason;
+    intent;
+    unsignedTxBase64;
+    name = "ColdstarEscalation";
+    decision = "ESCALATE";
+    constructor(reason, intent, 
+    /** base64 of the UNSIGNED transaction, for the air-gapped hand-off (QR). */
+    unsignedTxBase64) {
+        super(`Coldstar policy ESCALATE: ${reason}`);
+        this.reason = reason;
+        this.intent = intent;
+        this.unsignedTxBase64 = unsignedTxBase64;
+    }
+}
+export class ColdstarWallet {
+    publicKey;
+    policy;
+    session;
+    rpcUrl;
+    ledger;
+    onEscalate;
+    allowMessageSigning;
+    onDecision;
+    constructor(opts) {
+        this.policy = opts.policy;
+        this.session = opts.session;
+        this.publicKey = opts.session.publicKey;
+        this.rpcUrl = opts.rpcUrl;
+        this.ledger = opts.ledger ?? new InMemorySpendLedger();
+        this.onEscalate = opts.onEscalate ?? defaultEscalate;
+        this.allowMessageSigning = opts.allowMessageSigning ?? false;
+        this.onDecision = opts.onDecision;
+    }
+    /**
+     * Evaluate without signing. Pure with respect to the ledger (reads only).
+     * Exposed so an agent can pre-flight a plan and so tests can assert on it.
+     */
+    verdict(tx, extraSpendSol = 0) {
+        const projected = projectTransaction(tx);
+        if (!projected.ok)
+            return { decision: "ESCALATE", reason: projected.reason, intent: undefined };
+        const parsed = parseTx(projected.message);
+        if (!parsed.ok)
+            return { decision: "ESCALATE", reason: parsed.reason, intent: undefined };
+        const state = this.ledger.get();
+        const r = evaluate(parsed.intent, this.policy, {
+            dailySpentSol: state.dailySpentSol + extraSpendSol,
+        });
+        return { decision: r.decision, reason: r.reason, intent: parsed.intent };
+    }
+    async signTransaction(transaction) {
+        const [signed] = await this.signAllTransactions([transaction]);
+        return signed;
+    }
+    /**
+     * Batch semantics: every transaction is evaluated first, with the daily cap
+     * accumulating across the batch, and NOTHING is signed if any one of them is
+     * REJECTED. Escalations are handled per transaction after the batch clears.
+     */
+    async signAllTransactions(transactions) {
+        const verdicts = [];
+        let pending = 0;
+        for (const tx of transactions) {
+            const v = this.verdict(tx, pending);
+            verdicts.push(v);
+            if (v.decision === "AUTO_SIGN")
+                pending += v.intent?.outSol ?? 0;
+        }
+        const rejected = verdicts.find((v) => v.decision === "REJECT");
+        if (rejected) {
+            this.onDecision?.(rejected);
+            throw new ColdstarRejected(rejected.reason, rejected.intent);
+        }
+        const out = [];
+        for (let i = 0; i < transactions.length; i++) {
+            const tx = transactions[i];
+            const v = verdicts[i];
+            this.onDecision?.(v);
+            if (v.decision === "AUTO_SIGN") {
+                this.signWithSession(tx);
+                this.ledger.add(v.intent?.outSol ?? 0);
+                out.push(tx);
+                continue;
+            }
+            // ESCALATE
+            const approved = await this.onEscalate(tx, v.reason, v.intent);
+            if (approved === null) {
+                throw new ColdstarEscalation(v.reason, v.intent, serializeUnsigned(tx));
+            }
+            // A human approved it on the cold side; count the spend, pass it through.
+            this.ledger.add(v.intent?.outSol ?? 0);
+            out.push(approved);
+        }
+        return out;
+    }
+    async sendTransaction(transaction) {
+        const { signature } = await this.signAndSendTransaction(transaction);
+        return signature;
+    }
+    async signAndSendTransaction(transaction, options) {
+        const signed = await this.signTransaction(transaction);
+        const connection = new Connection(this.rpcUrl);
+        const signature = await connection.sendRawTransaction(signed.serialize(), options);
+        return { signature };
+    }
+    async signMessage(message) {
+        if (!this.allowMessageSigning) {
+            const reason = "off-chain message signing is disabled by policy (allowMessageSigning=false)";
+            this.onDecision?.({ decision: "REJECT", reason, intent: undefined });
+            throw new ColdstarRejected(reason, undefined);
+        }
+        return nacl.sign.detached(message, this.session.secretKey);
+    }
+    signWithSession(tx) {
+        if (isVersionedTransaction(tx))
+            tx.sign([this.session]);
+        else
+            tx.partialSign(this.session);
+    }
+}
+const defaultEscalate = async () => null;
+function serializeUnsigned(tx) {
+    const bytes = isVersionedTransaction(tx)
+        ? tx.serialize()
+        : tx.serialize({ requireAllSignatures: false, verifySignatures: false });
+    return base64(bytes);
+}
+// Dependency-free base64 so this file needs neither Node's Buffer nor the DOM lib.
+const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+function base64(bytes) {
+    let out = "";
+    for (let i = 0; i < bytes.length; i += 3) {
+        const a = bytes[i], b = bytes[i + 1], c = bytes[i + 2];
+        const n = (a << 16) | ((b ?? 0) << 8) | (c ?? 0);
+        out += B64.charAt((n >> 18) & 63) + B64.charAt((n >> 12) & 63);
+        out += b === undefined ? "=" : B64.charAt((n >> 6) & 63);
+        out += c === undefined ? "=" : B64.charAt(n & 63);
+    }
+    return out;
+}
+//# sourceMappingURL=coldstarWallet.js.map

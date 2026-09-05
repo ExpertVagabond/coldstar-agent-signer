@@ -1,5 +1,7 @@
 node_modules/
-dist/
+# dist/ is COMMITTED so `npm install github:ExpertVagabond/coldstar-agent-signer`
+# works without a build step (npm does not run `prepare` for git deps reliably).
+# Run `npm run build` before committing source changes.
 *.log
 .DS_Store
 
