@@ -215,4 +215,27 @@ describe("ColdstarWallet — fail-closed edges", () => {
     await w.signTransaction(legacyTransfer(allowed, 9)).catch(() => {});
     expect(seen).toEqual(["AUTO_SIGN", "REJECT", "ESCALATE"]);
   });
+
+  it("re-signing an already-signed transaction is a no-op: same bytes, no second ledger entry", async () => {
+    const ledger = new InMemorySpendLedger();
+    const w = wallet({ ledger });
+    const tx = legacyTransfer(allowed, 0.05);
+    const once = await w.signTransaction(tx);
+    const bytes1 = Buffer.from(once.serialize());
+    const twice = await w.signTransaction(once);
+    expect(Buffer.from(twice.serialize()).equals(bytes1)).toBe(true);
+    expect(ledger.get().dailySpentSol).toBeCloseTo(0.05, 9);
+    const v0 = await w.signTransaction(versionedTransfer(allowed, 0.05));
+    await w.signTransaction(v0);
+    expect(ledger.get().dailySpentSol).toBeCloseTo(0.1, 9);
+  });
+
+  it("a tampered message with a stale signature is NOT treated as already signed", async () => {
+    const w = wallet();
+    const tx = await w.signTransaction(legacyTransfer(allowed, 0.01));
+    // Mutate the message after signing: the old signature no longer verifies.
+    tx.instructions[0] = SystemProgram.transfer({ fromPubkey: session.publicKey, toPubkey: blocked, lamports: 1 });
+    tx.signatures = tx.signatures.map((s) => ({ ...s })); // keep the stale sig entry
+    await expect(w.signTransaction(tx)).rejects.toMatchObject({ decision: "REJECT" });
+  });
 });

@@ -131,6 +131,8 @@ export declare class ColdstarWallet implements BaseWalletLike {
         signature: TransactionSignature;
     }>;
     signMessage(message: Uint8Array): Promise<Uint8Array>;
+    /** True if `tx` already carries a valid signature by the session key over its current message. */
+    private alreadySignedBySession;
     private signWithSession;
 }
 //# sourceMappingURL=coldstarWallet.d.ts.map

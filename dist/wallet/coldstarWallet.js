@@ -157,9 +157,14 @@ export class ColdstarWallet {
      * REJECTED. Escalations are handled per transaction after the batch clears.
      */
     async signAllTransactions(transactions) {
+        // Idempotence: a transaction that already carries a valid session signature over
+        // its current message bytes is returned as-is — not re-evaluated, not re-counted.
+        // Re-signing identical bytes creates no new spending power, so a retry loop that
+        // calls signTransaction twice must not drain the daily cap twice.
+        const fresh = transactions.filter((tx) => !this.alreadySignedBySession(tx));
         const verdicts = [];
         let pending = 0;
-        for (const tx of transactions) {
+        for (const tx of fresh) {
             const v = await this.evaluateTx(tx, pending);
             verdicts.push(v);
             if (v.decision === "AUTO_SIGN")
@@ -171,9 +176,14 @@ export class ColdstarWallet {
             throw new ColdstarRejected(rejected.reason, rejected.intent);
         }
         const out = [];
+        let vi = 0;
         for (let i = 0; i < transactions.length; i++) {
             const tx = transactions[i];
-            const v = verdicts[i];
+            if (!fresh.includes(tx)) {
+                out.push(tx); // already signed by us; pass through
+                continue;
+            }
+            const v = verdicts[vi++];
             this.onDecision?.(v);
             if (v.decision === "AUTO_SIGN") {
                 this.signWithSession(tx);
@@ -209,6 +219,25 @@ export class ColdstarWallet {
             throw new ColdstarRejected(reason, undefined);
         }
         return nacl.sign.detached(message, this.session.secretKey);
+    }
+    /** True if `tx` already carries a valid signature by the session key over its current message. */
+    alreadySignedBySession(tx) {
+        const pub = this.session.publicKey;
+        if (isVersionedTransaction(tx)) {
+            const keys = tx.message.staticAccountKeys;
+            const n = tx.message.header.numRequiredSignatures;
+            for (let i = 0; i < n; i++) {
+                if (keys[i]?.equals(pub)) {
+                    const sig = tx.signatures[i];
+                    return !!sig && sig.some((b) => b !== 0) && nacl.sign.detached.verify(tx.message.serialize(), sig, pub.toBytes());
+                }
+            }
+            return false;
+        }
+        const entry = tx.signatures.find((s) => s.publicKey.equals(pub));
+        if (!entry || !entry.signature)
+            return false;
+        return nacl.sign.detached.verify(tx.serializeMessage(), entry.signature, pub.toBytes());
     }
     signWithSession(tx) {
         if (isVersionedTransaction(tx))
