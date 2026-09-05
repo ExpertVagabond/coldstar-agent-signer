@@ -32,6 +32,20 @@ raw tx ──(adapter: @solana/kit parse)──▶ TxIntent ──(evaluate)─�
 | `src/signer/escalate.ts` | ⬜ TODO — QR / air-gap hand-off; today `onEscalate` is an injected handler |
 | `src/mcp/` | ⬜ TODO — MCP tool surface |
 
+## Install
+
+```bash
+npm install github:ExpertVagabond/coldstar-agent-signer @solana/web3.js tweetnacl
+```
+
+`@solana/web3.js` and `tweetnacl` are peer dependencies (Solana Agent Kit already brings both). An npm release under the `@coldstar` scope will follow; until then install from GitHub.
+
+**Status: beta, devnet.** The signing core and policy engine are in scope for Coldstar's planned independent audit. Run it against devnet, read the policy file before you trust it with anything, and see the posture note below.
+
+### Posture on non-System programs (read this)
+
+A swap through an allowlisted program such as Jupiter cannot be statically decoded to a SOL amount; the real number depends on routing and on-chain state. This release ships **posture (a): trust the program allowlist.** Allowlisting a program means "I accept that this program can move funds within its own logic." Per-transaction and daily caps therefore bound bare SOL transfers, not what an allowlisted program does internally. Keep `allowPrograms` short. Simulation-based accounting is the planned upgrade before this is recommended for mainnet; the decision seam is documented at `classifyOpaqueProgram` in `src/adapter/parseTx.ts`.
+
 ## Use it from Solana Agent Kit
 
 `ColdstarWallet` implements the same five methods as the kit's `KeypairWallet`, so it is a one-line swap:

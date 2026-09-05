@@ -162,8 +162,13 @@ function decodeSystemIx(
  * Currently implemented: (a), because it matches the policy file already on
  * disk (`allowPrograms` includes Jupiter) and keeps this function pure.
  *
- * TODO(matthew): confirm (a), or replace the body below to change posture.
- * If (c), return `{ ok: false, reason: ... }` for any non-System program.
+ * DECISION (2026-09-05, shipped for the devnet release): posture (a). The
+ * program allowlist is the control. Allowlisting a program means "I accept
+ * that this program can move funds within its own logic", and the README says
+ * so in those words. Revisit before recommending mainnet use: (b) simulation
+ * is the likely upgrade, wired as an optional pre-check in ColdstarWallet
+ * rather than inside this pure function. To switch to (c), return
+ * `{ ok: false, reason: ... }` for any non-System program.
  */
 function classifyOpaqueProgram(
   ix: CompiledInstruction,

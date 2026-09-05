@@ -1,14 +1,57 @@
 {
   "name": "@coldstar/agent-signer",
-  "author": "Matthew Karsten <matthewkarstenconnects@gmail.com>",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Agent-safe signing for Coldstar — policy-gated auto-sign / air-gapped escalation / reject. The agent never holds the root key.",
-  "type": "module",
+  "author": "Matthew Karsten <matthewkarstenconnects@gmail.com>",
   "license": "MIT",
+  "homepage": "https://coldstar.dev/agent-signing",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ExpertVagabond/coldstar-agent-signer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ExpertVagabond/coldstar-agent-signer/issues"
+  },
+  "keywords": [
+    "solana",
+    "wallet",
+    "ai-agent",
+    "agent-wallet",
+    "policy",
+    "signer",
+    "air-gap",
+    "cold-storage",
+    "solana-agent-kit",
+    "coldstar"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "coldstar.policy.json"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build",
+    "prepare": "npm run build"
   },
   "peerDependencies": {
     "@solana/web3.js": "^1.95.0",
