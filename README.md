@@ -2,14 +2,14 @@
 
 Agent-safe signing for Coldstar. Lets an AI agent transact on Solana **without ever holding the root key**: routine, in-policy transactions auto-sign on a cold-rooted session key; out-of-policy transactions escalate to **air-gapped human approval**; disallowed/injected transactions are **rejected**.
 
-This repo is the **starter scaffold for the MVP demo** (`build-context.md`). The security-critical piece — the policy engine — is here, tested. The Solana adapter + MCP wiring are stubs to fill in.
+Three layers, all here and tested: a pure policy engine, a fail-closed transaction decoder, and two ways to hold the wallet — `ColdstarWallet` (a drop-in for Solana Agent Kit's `BaseWallet`) and `coldstar-signer-mcp` (an MCP server for Claude, Cursor, or any MCP client). Beta, devnet.
 
 ## Why this shape
 
 The decision logic (`src/policy/evaluate.ts`) is a **pure function** over a normalized `TxIntent` — no I/O, no `@solana/*` imports. That's deliberate: the part that must be correct is exhaustively unit-testable without a validator, a network, or a wallet. Parsing a raw transaction into `{ outSol, recipients, instructions }` is the adapter's job, where a bug is a reliability issue, not a security hole.
 
 ```
-raw tx ──(adapter: @solana/kit parse)──▶ TxIntent ──(evaluate)──▶ AUTO_SIGN | ESCALATE | REJECT
+raw tx ──(project + parseTx, fail-closed)──▶ TxIntent ──(evaluate)──▶ AUTO_SIGN | ESCALATE | REJECT
                                                              │
                               AUTO_SIGN ─▶ cold-rooted session signer
                               ESCALATE  ─▶ air-gapped device (QR)
@@ -32,7 +32,7 @@ raw tx ──(adapter: @solana/kit parse)──▶ TxIntent ──(evaluate)─�
 | `src/signer/escalate.ts` | ✅ `declineEscalation`, `terminalEscalation` (paste-back with same-message verification), `acceptSignedResponse` |
 | `src/mcp/server.ts` | ✅ MCP server: `coldstar_status`, `coldstar_verdict`, `coldstar_sign`, `coldstar_sign_and_send`, `coldstar_transfer_sol` |
 | `src/mcp/cli.ts` | ✅ `coldstar-signer-mcp` stdio binary, configured by env |
-| `src/mcp/server.test.ts` | ✅ 9 tests over an in-memory MCP client |
+| `src/mcp/server.test.ts` | ✅ 10 tests over an in-memory MCP client |
 
 ## Use it from any MCP client (Claude, Cursor, …)
 
@@ -59,7 +59,7 @@ The same wallet as an MCP server. The model gets five tools and never a key; eve
 | `coldstar_status` | Session address, the policy, today's spend against the daily cap |
 | `coldstar_verdict` | Evaluate a base64 transaction; returns AUTO_SIGN / ESCALATE / REJECT and why. Signs nothing. |
 | `coldstar_sign` | Sign under policy. `signed` returns the signed tx; `escalated` returns the unsigned tx for the air-gapped device; `rejected` returns no bytes at all. |
-| `coldstar_sign_and_send` | As above, then broadcast if signed |
+| `coldstar_sign_and_send` | As above, then broadcast if signed; an RPC failure returns `send_failed` with the reason instead of an error |
 | `coldstar_transfer_sol` | Build + evaluate + send a SOL transfer from the session wallet (`dry_run: true` for the verdict only) |
 
 `COLDSTAR_SESSION_KEYFILE` is a `solana-keygen`-style JSON byte array; `COLDSTAR_SESSION_KEY` (base58) also works. It is the **session** key. The root key has no environment variable because it never lives on this machine.
@@ -119,8 +119,9 @@ fully account for — an unknown System discriminant, a truncated lamports field
 accounts — yields `{ ok: false, reason }`, and **callers must treat that as ESCALATE.**
 "Could not be accounted for" is not "safe".
 
-Open posture decision for non-System programs is documented at the `classifyOpaqueProgram`
-seam in `src/adapter/parseTx.ts`. Current behaviour: trust the program allowlist.
+The posture for non-System programs (trust the program allowlist, decided for the devnet
+release) is documented at the `classifyOpaqueProgram` seam in `src/adapter/parseTx.ts` and in
+the install section above.
 
 ## Run the tests
 

@@ -30,13 +30,30 @@ function deserialize(base64Tx) {
 }
 const Outcome = {
     decision: z.enum(["AUTO_SIGN", "ESCALATE", "REJECT"]),
-    status: z.enum(["signed", "escalated", "rejected"]),
+    status: z.enum(["signed", "escalated", "rejected", "send_failed"]),
     reason: z.string(),
     signed_transaction_base64: z.string().optional(),
     unsigned_transaction_base64: z.string().optional(),
     signature: z.string().optional(),
     explorer_url: z.string().optional(),
 };
+/**
+ * Broadcast a signed transaction. RPC failures (unfunded wallet, expired
+ * blockhash, node down) come back as a `send_failed` outcome rather than a
+ * thrown MCP error, so the model sees what happened and does not retry blindly.
+ * The signature was produced under policy either way; the ledger has counted it.
+ */
+async function broadcast(rpcUrl, cluster, out) {
+    try {
+        const connection = new Connection(rpcUrl, "confirmed");
+        const signature = await connection.sendRawTransaction(b64.decode(out.signed_transaction_base64));
+        return { ...out, signature, explorer_url: `https://explorer.solana.com/tx/${signature}${cluster}` };
+    }
+    catch (e) {
+        const msg = e.message ?? String(e);
+        return { ...out, status: "send_failed", reason: `signed under policy, but broadcast failed: ${msg.split("\n")[0]}` };
+    }
+}
 function text(o) {
     return { content: [{ type: "text", text: JSON.stringify(o, null, 2) }], structuredContent: o };
 }
@@ -115,16 +132,14 @@ export function createColdstarMcpServer(opts) {
     }, async ({ transaction_base64 }) => text(await signOrExplain(deserialize(transaction_base64))));
     server.registerTool("coldstar_sign_and_send", {
         title: "Sign under policy and broadcast",
-        description: "Like coldstar_sign, then broadcasts a signed transaction to the configured RPC and returns the signature. Escalated and rejected outcomes are returned, not broadcast.",
+        description: "Like coldstar_sign, then broadcasts a signed transaction to the configured RPC and returns the signature. Escalated and rejected outcomes are returned, not broadcast. A broadcast failure returns status send_failed with the RPC reason.",
         inputSchema: { transaction_base64: z.string().describe("Unsigned transaction, base64 (legacy or v0)") },
         outputSchema: Outcome,
     }, async ({ transaction_base64 }) => {
         const out = await signOrExplain(deserialize(transaction_base64));
         if (out.status !== "signed")
             return text(out);
-        const connection = new Connection(rpcUrl, "confirmed");
-        const signature = await connection.sendRawTransaction(b64.decode(out.signed_transaction_base64));
-        return text({ ...out, signature, explorer_url: `https://explorer.solana.com/tx/${signature}${cluster}` });
+        return text(await broadcast(rpcUrl, cluster, out));
     });
     server.registerTool("coldstar_transfer_sol", {
         title: "Transfer SOL under policy",
@@ -158,8 +173,7 @@ export function createColdstarMcpServer(opts) {
         const out = await signOrExplain(tx);
         if (out.status !== "signed")
             return text(out);
-        const signature = await connection.sendRawTransaction(b64.decode(out.signed_transaction_base64));
-        return text({ ...out, signature, explorer_url: `https://explorer.solana.com/tx/${signature}${cluster}` });
+        return text(await broadcast(rpcUrl, cluster, out));
     });
     return server;
 }

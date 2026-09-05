@@ -126,4 +126,12 @@ describe("Coldstar MCP server", () => {
     expect(out.status).toBe("rejected");
     expect(out.signature).toBeUndefined();
   });
+
+  it("sign_and_send returns send_failed (not an MCP error) when the RPC cannot be reached", async () => {
+    const out = await call("coldstar_sign_and_send", { transaction_base64: legacyB64(allowed, 0.005) });
+    expect(out.status).toBe("send_failed");
+    expect(out.decision).toBe("AUTO_SIGN");
+    expect(out.reason).toMatch(/broadcast failed/);
+    expect(out.signature).toBeUndefined();
+  });
 });
