@@ -1,4 +1,4 @@
-# @coldstar/agent-signer
+# coldstar-agent-signer
 
 Agent-safe signing for Coldstar. Lets an AI agent transact on Solana **without ever holding the root key**: routine, in-policy transactions auto-sign on a cold-rooted session key; out-of-policy transactions escalate to **air-gapped human approval**; disallowed/injected transactions are **rejected**.
 
@@ -64,7 +64,7 @@ The same wallet as an MCP server. The model gets five tools and never a key; eve
   "mcpServers": {
     "coldstar": {
       "command": "npx",
-      "args": ["-y", "github:ExpertVagabond/coldstar-agent-signer"],
+      "args": ["-y", "-p", "coldstar-agent-signer", "coldstar-signer-mcp"],
       "env": {
         "RPC_URL": "https://api.devnet.solana.com",
         "COLDSTAR_POLICY": "/abs/path/coldstar.policy.json",
@@ -88,10 +88,10 @@ The binary keeps the daily-spend ledger in `COLDSTAR_LEDGER` (default `./.coldst
 ## Install
 
 ```bash
-npm install github:ExpertVagabond/coldstar-agent-signer @solana/web3.js tweetnacl
+npm install coldstar-agent-signer @solana/web3.js tweetnacl
 ```
 
-`@solana/web3.js` and `tweetnacl` are peer dependencies (Solana Agent Kit already brings both). An npm release under the `@coldstar` scope will follow; until then install from GitHub.
+`@solana/web3.js` and `tweetnacl` are peer dependencies (Solana Agent Kit already brings both). Published on npm as `coldstar-agent-signer` (unscoped); `npm install github:ExpertVagabond/coldstar-agent-signer` also works and tracks main.
 
 **Status: beta, devnet.** The signing core and policy engine are in scope for Coldstar's planned independent audit. Run it against devnet, read the policy file before you trust it with anything, and see the posture note below.
 
@@ -105,7 +105,7 @@ A swap through an allowlisted program such as Jupiter cannot be statically decod
 
 ```ts
 import { Keypair } from "@solana/web3.js";
-import { ColdstarWallet, ColdstarEscalation, ColdstarRejected } from "@coldstar/agent-signer";
+import { ColdstarWallet, ColdstarEscalation, ColdstarRejected } from "coldstar-agent-signer";
 import policy from "./coldstar.policy.json";
 
 // The SESSION key. Disposable; authorised by the cold root's policy envelope.
