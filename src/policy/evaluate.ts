@@ -1,4 +1,4 @@
-import { Policy, TxIntent, EvalState, EvalResult } from "./schema";
+import { Policy, TxIntent, EvalState, EvalResult } from "./schema.js";
 
 /**
  * Pure policy evaluator — no I/O, no side effects. Decides whether an

@@ -12,7 +12,7 @@
 // escalates instead of guessing "no value moved".
 
 import { PublicKey, Transaction, VersionedTransaction } from "@solana/web3.js";
-import type { CompiledInstruction, DecompiledMessage } from "../adapter/parseTx";
+import type { CompiledInstruction, DecompiledMessage } from "../adapter/parseTx.js";
 
 export type ProjectResult =
   | { ok: true; message: DecompiledMessage }

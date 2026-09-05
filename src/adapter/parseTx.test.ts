@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { parseTx, fromKitTransaction, SYSTEM_PROGRAM_ID, DecompiledMessage } from "./parseTx";
-import { evaluate } from "../policy/evaluate";
-import { Policy, EvalState } from "../policy/schema";
+import { parseTx, fromKitTransaction, SYSTEM_PROGRAM_ID, DecompiledMessage } from "./parseTx.js";
+import { evaluate } from "../policy/evaluate.js";
+import { Policy, EvalState } from "../policy/schema.js";
 
 const JUP = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
 const AGENT = "AgentWallet11111111111111111111111111111111";

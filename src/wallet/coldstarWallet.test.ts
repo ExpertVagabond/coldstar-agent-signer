@@ -15,9 +15,9 @@ import {
   ColdstarEscalation,
   ColdstarRejected,
   InMemorySpendLedger,
-} from "./coldstarWallet";
-import { projectTransaction } from "./project";
-import type { Policy } from "../policy/schema";
+} from "./coldstarWallet.js";
+import { projectTransaction } from "./project.js";
+import type { Policy } from "../policy/schema.js";
 
 const JUP = new PublicKey("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
 const session = Keypair.generate();

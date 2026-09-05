@@ -18,7 +18,7 @@
 // without a validator. `fromKitTransaction()` at the bottom is the only seam
 // that touches a real SDK shape.
 
-import { TxIntent, TxInstruction, LAMPORTS_PER_SOL } from "../policy/schema";
+import { TxIntent, TxInstruction, LAMPORTS_PER_SOL } from "../policy/schema.js";
 
 export const SYSTEM_PROGRAM_ID = "11111111111111111111111111111111";
 

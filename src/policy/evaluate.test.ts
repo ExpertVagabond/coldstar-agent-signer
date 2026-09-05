@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { evaluate } from "./evaluate";
-import { Policy, TxIntent, EvalState } from "./schema";
+import { evaluate } from "./evaluate.js";
+import { Policy, TxIntent, EvalState } from "./schema.js";
 
 const SYSTEM = "11111111111111111111111111111111";
 const JUP = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";

@@ -28,10 +28,10 @@ import {
   type VersionedTransaction,
 } from "@solana/web3.js";
 import nacl from "tweetnacl";
-import { evaluate } from "../policy/evaluate";
-import type { Decision, EvalState, Policy, TxIntent } from "../policy/schema";
-import { parseTx } from "../adapter/parseTx";
-import { isVersionedTransaction, projectTransaction } from "./project";
+import { evaluate } from "../policy/evaluate.js";
+import type { Decision, EvalState, Policy, TxIntent } from "../policy/schema.js";
+import { parseTx } from "../adapter/parseTx.js";
+import { isVersionedTransaction, projectTransaction } from "./project.js";
 
 export type SolanaTx = Transaction | VersionedTransaction;
 
@@ -264,5 +264,7 @@ function serializeUnsigned(tx: SolanaTx): string {
   const bytes = isVersionedTransaction(tx)
     ? tx.serialize()
     : tx.serialize({ requireAllSignatures: false, verifySignatures: false });
-  return Buffer.from(bytes).toString("base64");
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
 }
