@@ -8,6 +8,8 @@ export { ColdstarWallet, ColdstarEscalation, ColdstarRejected, InMemorySpendLedg
 export { createColdstarMcpServer } from "./mcp/server.js";
 export { rpcSimulator } from "./wallet/simulate.js";
 export { FileSpendLedger } from "./wallet/ledger.js";
+export { signPolicyEnvelope, verifyPolicyEnvelope, parsePolicy, isEnvelope, PolicySchema } from "./policy/envelope.js";
+export type { PolicyEnvelope, EnvelopeCheck } from "./policy/envelope.js";
 export type { Simulator, SimulationResult } from "./wallet/simulate.js";
 export type { McpServerOptions } from "./mcp/server.js";
 export { declineEscalation, terminalEscalation, acceptSignedResponse, serializeUnsigned, } from "./signer/escalate.js";

@@ -18,7 +18,10 @@
 //   }
 //
 //   RPC_URL                       default https://api.devnet.solana.com
-//   COLDSTAR_POLICY               path to the policy JSON (default ./coldstar.policy.json)
+//   COLDSTAR_POLICY               path to the policy JSON, or a root-signed ENVELOPE from
+//                                 coldstar-sign-policy (default ./coldstar.policy.json)
+//   COLDSTAR_ROOT_PUBKEY          pin the root that must have signed the envelope (base58)
+//   COLDSTAR_REQUIRE_ENVELOPE     "1" to refuse a bare, unsigned policy
 //   COLDSTAR_SESSION_KEYFILE      path to a JSON byte-array keypair (solana-keygen format)
 //   COLDSTAR_SESSION_KEY          or the base58 secret key
 //   COLDSTAR_ALLOW_MESSAGE_SIGNING  "1" to enable off-chain message signing (off by default)
@@ -37,6 +40,7 @@ import { ColdstarWallet } from "../wallet/coldstarWallet.js";
 import { rpcSimulator } from "../wallet/simulate.js";
 import { FileSpendLedger } from "../wallet/ledger.js";
 import type { Policy } from "../policy/schema.js";
+import { isEnvelope, parsePolicy } from "../policy/envelope.js";
 import { createColdstarMcpServer } from "./server.js";
 
 function fail(msg: string): never {
@@ -47,14 +51,25 @@ function fail(msg: string): never {
 const rpcUrl = process.env.RPC_URL ?? "https://api.devnet.solana.com";
 const policyPath = process.env.COLDSTAR_POLICY ?? "coldstar.policy.json";
 
-let policy: Policy;
+let policyRaw: unknown;
 try {
-  policy = JSON.parse(readFileSync(policyPath, "utf8")) as Policy;
+  policyRaw = JSON.parse(readFileSync(policyPath, "utf8"));
 } catch (e) {
   fail(`cannot read policy at ${policyPath}: ${(e as Error).message}`);
 }
+const envelopeMode = isEnvelope(policyRaw);
+const expectedRoot = process.env.COLDSTAR_ROOT_PUBKEY;
+if (!envelopeMode && process.env.COLDSTAR_REQUIRE_ENVELOPE === "1") {
+  fail(`${policyPath} is a bare policy but COLDSTAR_REQUIRE_ENVELOPE=1; sign it on the cold machine with coldstar-sign-policy`);
+}
+let policy: Policy;
+try {
+  policy = envelopeMode ? (policyRaw as { policy: Policy }).policy : parsePolicy(policyRaw);
+} catch (e) {
+  fail((e as Error).message);
+}
 for (const k of ["allowRecipients", "blockRecipients"] as const) {
-  if (policy[k].some((v) => v.startsWith("<"))) fail(`policy.${k} still has a placeholder; fill in real public keys`);
+  if (policy[k].some((v) => v.startsWith("<") || v.startsWith("$"))) fail(`policy.${k} still has a placeholder; fill in real public keys`);
 }
 
 let session: Keypair;
@@ -70,8 +85,7 @@ if (process.env.COLDSTAR_SESSION_KEYFILE) {
 
 // The daily cap must survive restarts, so the MCP binary always uses a file ledger.
 const ledgerPath = process.env.COLDSTAR_LEDGER ?? ".coldstar-ledger.json";
-const wallet = new ColdstarWallet({
-  policy,
+const walletOpts = {
   session,
   rpcUrl,
   ledger: new FileSpendLedger(ledgerPath),
@@ -81,9 +95,22 @@ const wallet = new ColdstarWallet({
   ...(process.env.COLDSTAR_SIMULATE
     ? { preflight: { simulate: rpcSimulator(rpcUrl), when: process.env.COLDSTAR_SIMULATE === "always" ? "always" as const : "opaque" as const } }
     : {}),
-  onDecision: (v) => process.stderr.write(`[coldstar] ${v.decision} ${v.intent?.outSol ?? "?"} SOL — ${v.reason}\n`),
-});
+  onDecision: (v: { decision: string; intent?: { outSol: number } | undefined; reason: string }) =>
+    process.stderr.write(`[coldstar] ${v.decision} ${v.intent?.outSol ?? "?"} SOL — ${v.reason}\n`),
+};
+
+let wallet: ColdstarWallet;
+try {
+  wallet = envelopeMode
+    ? ColdstarWallet.fromEnvelope({ ...walletOpts, envelope: policyRaw, ...(expectedRoot ? { expectedRoot } : {}) })
+    : new ColdstarWallet({ ...walletOpts, policy });
+} catch (e) {
+  fail((e as Error).message);
+}
+if (envelopeMode && !expectedRoot) {
+  process.stderr.write("[coldstar] WARNING: envelope accepted without COLDSTAR_ROOT_PUBKEY pinned; any key could have signed it\n");
+}
 
 const server = createColdstarMcpServer({ wallet, policy, rpcUrl });
 await server.connect(new StdioServerTransport());
-process.stderr.write(`[coldstar] MCP signer up. session=${session.publicKey.toBase58()} rpc=${rpcUrl}\n`);
+process.stderr.write(`[coldstar] MCP signer up. session=${session.publicKey.toBase58()} rpc=${rpcUrl}` + (wallet.envelope ? ` policy signed by root ${wallet.envelope.rootPubkey}` + (wallet.envelope.expiresAt ? ` until ${wallet.envelope.expiresAt}` : "") : " policy UNSIGNED (devnet only)") + `\n`);

@@ -35,6 +35,7 @@ import { parseTx } from "../adapter/parseTx.js";
 import { isVersionedTransaction, projectTransaction } from "./project.js";
 import { SYSTEM_PROGRAM_ID } from "../adapter/parseTx.js";
 import type { Simulator } from "./simulate.js";
+import { verifyPolicyEnvelope, type PolicyEnvelope } from "../policy/envelope.js";
 
 export type SolanaTx = Transaction | VersionedTransaction;
 
@@ -159,6 +160,8 @@ export interface Verdict {
 
 export class ColdstarWallet implements BaseWalletLike {
   readonly publicKey: PublicKey;
+  /** Set when the wallet was built from a root-signed envelope. */
+  readonly envelope: PolicyEnvelope | undefined;
   private readonly policy: Policy;
   private readonly session: SessionSigner;
   private readonly rpcUrl: string;
@@ -168,7 +171,25 @@ export class ColdstarWallet implements BaseWalletLike {
   private readonly onDecision: ColdstarWalletOptions["onDecision"];
   private readonly preflight: ColdstarWalletOptions["preflight"];
 
-  constructor(opts: ColdstarWalletOptions) {
+  /**
+   * Build a wallet from a ROOT-SIGNED policy envelope. Verifies the root's
+   * signature, that the envelope names this session key, and expiry, and
+   * throws otherwise: an edited policy or an unauthorised session key never
+   * gets a running signer. Pin `expectedRoot` in anything beyond a demo.
+   */
+  static fromEnvelope(opts: Omit<ColdstarWalletOptions, "policy"> & { envelope: unknown; expectedRoot?: string; now?: Date }): ColdstarWallet {
+    const check = verifyPolicyEnvelope(opts.envelope, {
+      sessionPubkey: opts.session.publicKey.toBase58(),
+      ...(opts.expectedRoot ? { expectedRoot: opts.expectedRoot } : {}),
+      ...(opts.now ? { now: opts.now } : {}),
+    });
+    if (!check.ok) throw new Error(`Coldstar: refusing to start — ${check.reason}`);
+    const { envelope: _e, expectedRoot: _r, now: _n, ...rest } = opts;
+    return new ColdstarWallet({ ...rest, policy: check.envelope.policy }, check.envelope);
+  }
+
+  constructor(opts: ColdstarWalletOptions, envelope?: PolicyEnvelope) {
+    this.envelope = envelope;
     this.policy = opts.policy;
     this.session = opts.session;
     this.publicKey = opts.session.publicKey;

@@ -1,6 +1,7 @@
 import { type Keypair, type PublicKey, type SendOptions, type Transaction, type TransactionSignature, VersionedTransaction } from "@solana/web3.js";
 import type { Decision, EvalState, Policy, TxIntent } from "../policy/schema.js";
 import type { Simulator } from "./simulate.js";
+import { type PolicyEnvelope } from "../policy/envelope.js";
 export type SolanaTx = Transaction | VersionedTransaction;
 /** Structural copy of Solana Agent Kit's BaseWallet — no import needed. */
 export interface BaseWalletLike {
@@ -96,6 +97,8 @@ export interface Verdict {
 }
 export declare class ColdstarWallet implements BaseWalletLike {
     readonly publicKey: PublicKey;
+    /** Set when the wallet was built from a root-signed envelope. */
+    readonly envelope: PolicyEnvelope | undefined;
     private readonly policy;
     private readonly session;
     private readonly rpcUrl;
@@ -104,7 +107,18 @@ export declare class ColdstarWallet implements BaseWalletLike {
     private readonly allowMessageSigning;
     private readonly onDecision;
     private readonly preflight;
-    constructor(opts: ColdstarWalletOptions);
+    /**
+     * Build a wallet from a ROOT-SIGNED policy envelope. Verifies the root's
+     * signature, that the envelope names this session key, and expiry, and
+     * throws otherwise: an edited policy or an unauthorised session key never
+     * gets a running signer. Pin `expectedRoot` in anything beyond a demo.
+     */
+    static fromEnvelope(opts: Omit<ColdstarWalletOptions, "policy"> & {
+        envelope: unknown;
+        expectedRoot?: string;
+        now?: Date;
+    }): ColdstarWallet;
+    constructor(opts: ColdstarWalletOptions, envelope?: PolicyEnvelope);
     /**
      * Evaluate without signing. Pure with respect to the ledger (reads only).
      * Exposed so an agent can pre-flight a plan and so tests can assert on it.

@@ -37,6 +37,23 @@ raw tx ──(project + parseTx, fail-closed)──▶ TxIntent ──(evaluate)
 | `src/wallet/simulate.test.ts` | ✅ 9 tests with an injected simulator |
 | `src/wallet/ledger.ts` | ✅ `FileSpendLedger` — the daily cap survives restarts; atomic writes, 0600, refuses to start from a corrupt file |
 | `src/wallet/ledger.test.ts` | ✅ 7 tests incl. cap-holds-across-wallet-restart |
+| `src/policy/envelope.ts` | ✅ the root-signed policy envelope: `signPolicyEnvelope`, `verifyPolicyEnvelope`, `parsePolicy` (strict schema) |
+| `src/cli/signPolicy.ts` | ✅ `coldstar-sign-policy` — run on the cold machine; emits the envelope |
+| `src/policy/envelope.test.ts` | ✅ 11 tests: tamper, wrong root, wrong session, expiry, canonical ordering, wallet refuses bad envelopes |
+
+## The root signs the policy, not the transaction
+
+The cold root never signs transactions for the agent. It signs a **policy envelope** once, on the air-gapped machine: the policy, the one session public key it applies to, an issue time, and an expiry, canonically encoded and Ed25519-signed. The online signer verifies that signature at startup and refuses to run if the policy was edited, the session key is not the one named, the envelope has expired, or (when pinned) the root is not the expected one.
+
+```bash
+# on the AIR-GAPPED machine (root keyfile never leaves it)
+coldstar-sign-policy --root /media/cold/root.json --policy coldstar.policy.json \
+  --session <session pubkey> --expires 7d > envelope.json
+# carry envelope.json across the gap (QR / file), then on the online host:
+COLDSTAR_POLICY=envelope.json COLDSTAR_ROOT_PUBKEY=<root pubkey> COLDSTAR_REQUIRE_ENVELOPE=1 coldstar-signer-mcp
+```
+
+In code: `ColdstarWallet.fromEnvelope({ envelope, expectedRoot, session, rpcUrl })`. A bare, unsigned `coldstar.policy.json` still works for tests and devnet; set `COLDSTAR_REQUIRE_ENVELOPE=1` anywhere it matters.
 
 ## Use it from any MCP client (Claude, Cursor, …)
 
