@@ -1,0 +1,27 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      # dist/ is committed so `npm install github:…` works without a build step.
+      # Fail if a source change was committed without rebuilding it.
+      - name: dist is in sync with src
+        run: git diff --exit-code -- dist || (echo "::error::dist/ is stale — run npm run build and commit" && exit 1)
