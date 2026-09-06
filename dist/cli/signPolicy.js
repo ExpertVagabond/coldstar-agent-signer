@@ -6,11 +6,13 @@
 //   coldstar-sign-policy --root /path/to/root.json --policy coldstar.policy.json \
 //                        --session <session pubkey base58> [--expires 24h|7d|2026-12-31T00:00:00Z]
 //                        [--revoker <pubkey>]   a hot key that may revoke this grant on chain
+//                        [--allow-network]      override the air-gap check (do not, for a real root)
 //
 // Nothing here touches a network. The root secret never leaves this process.
 import { readFileSync } from "node:fs";
 import { Keypair } from "@solana/web3.js";
 import { signPolicyEnvelope, parsePolicy } from "../policy/envelope.js";
+import { checkAirGap, describeAirGap } from "../policy/airgap.js";
 function arg(name) {
     const i = process.argv.indexOf(`--${name}`);
     return i >= 0 ? process.argv[i + 1] : undefined;
@@ -37,6 +39,18 @@ if (expiresArg) {
             fail(`--expires: cannot parse '${expiresArg}' (use 24h, 7d, or ISO-8601)`);
     }
 }
+// The root secret is about to be read into memory. If this machine has a live
+// network path it is not the air-gapped machine, whatever the operator believes.
+const gap = checkAirGap();
+if (!gap.airGapped && !process.argv.includes("--allow-network")) {
+    process.stderr.write(`coldstar-sign-policy: ${describeAirGap(gap)}\n` +
+        "Refusing to read the root key on a networked machine. Move to the offline machine, or pass\n" +
+        "--allow-network if you have decided this is acceptable (it is not, for a real root key).\n");
+    process.exit(3);
+}
+if (!gap.airGapped) {
+    process.stderr.write("coldstar-sign-policy: WARNING — signing the root key on a NETWORKED machine (--allow-network).\n");
+}
 const root = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(rootPath, "utf8"))));
 const policy = parsePolicy(JSON.parse(readFileSync(policyPath, "utf8")));
 for (const k of ["allowRecipients", "blockRecipients"]) {
@@ -48,4 +62,5 @@ process.stdout.write(JSON.stringify(envelope, null, 2) + "\n");
 process.stderr.write(`signed by root ${envelope.rootPubkey} for session ${sessionPubkey}` +
     (expiresAt ? `, expires ${envelope.expiresAt}` : ", no expiry (consider --expires)") +
     (revoker ? `, revocable by ${revoker}` : "") + "\n");
+process.stderr.write(`air gap: ${describeAirGap(gap)}\n`);
 //# sourceMappingURL=signPolicy.js.map

@@ -44,6 +44,8 @@ raw tx ──(project + parseTx, fail-closed)──▶ TxIntent ──(evaluate)
 | `src/policy/envelope.ts` | ✅ the root-signed policy envelope: `signPolicyEnvelope`, `verifyPolicyEnvelope`, `parsePolicy` (strict schema) |
 | `src/cli/signPolicy.ts` | ✅ `coldstar-sign-policy` — run on the cold machine; emits the envelope |
 | `src/policy/revocation.ts` | ✅ on-chain revocation: signed memo marker, `RevocationChecker`, fail-closed |
+| `src/policy/airgap.ts` | ✅ the cold-side tool refuses to read the root key on a networked machine |
+| `THREAT-MODEL.md` | ✅ what this protects, what it does not, and how to build an air gap that earns the name |
 | `src/cli/revoke.ts` | ✅ `coldstar-revoke` — cancel a grant early |
 | `src/policy/revocation.test.ts` | ✅ 13 tests incl. forged-marker and unreachable-chain cases |
 | `src/policy/envelope.test.ts` | ✅ 11 tests: tamper, wrong root, wrong session, expiry, canonical ordering, wallet refuses bad envelopes |
@@ -115,7 +117,13 @@ npm install coldstar-agent-signer @solana/web3.js tweetnacl
 
 `@solana/web3.js` and `tweetnacl` are peer dependencies (Solana Agent Kit already brings both). Published on npm as `coldstar-agent-signer` (unscoped); `npm install github:ExpertVagabond/coldstar-agent-signer` also works and tracks main.
 
+Read [`THREAT-MODEL.md`](THREAT-MODEL.md) before trusting this with anything. It states plainly what the design does not protect against: no secure element, a keylogger on the offline machine defeats it entirely, a stolen session key is beyond any local control, and the code is unaudited.
+
 **Status: beta, devnet.** The signing core and policy engine are in scope for Coldstar's planned independent audit. Run it against devnet, read the policy file before you trust it with anything, and see the posture note below.
+
+### The air gap is the part people get wrong
+
+Switching Wi-Fi off is not an air gap, and neither is a machine you also browse on. `coldstar-sign-policy` refuses to read the root key when the machine has a live network interface, prints what it found, and requires `--allow-network` to proceed anyway. It is a guard rail, not proof: it cannot see a VM's isolation, a tether attached later, or a radio the OS does not enumerate. The setup that earns the name is in [`THREAT-MODEL.md`](THREAT-MODEL.md).
 
 ### SPL tokens, and a hole that used to be here (read this)
 

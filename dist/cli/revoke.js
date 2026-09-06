@@ -17,6 +17,7 @@
 import { readFileSync } from "node:fs";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { buildRevocationTransaction, revocationMemo } from "../policy/revocation.js";
+import { checkAirGap } from "../policy/airgap.js";
 function arg(name) {
     const i = process.argv.indexOf(`--${name}`);
     return i >= 0 ? process.argv[i + 1] : undefined;
@@ -34,6 +35,11 @@ try {
 }
 catch {
     fail(`--session: '${sessionPubkey}' is not a valid public key`);
+}
+// --unsigned is the air-gapped path (the root signs offline). Broadcasting is
+// not, so only warn there: a revoker key is meant to be hot.
+if (unsigned && !checkAirGap().airGapped) {
+    process.stderr.write("coldstar-revoke: note — building an unsigned revocation on a networked machine.\n");
 }
 const authority = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(authorityPath, "utf8"))));
 const connection = new Connection(rpcUrl, "confirmed");

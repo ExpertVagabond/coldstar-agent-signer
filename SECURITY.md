@@ -13,6 +13,10 @@ Include a description, reproduction steps, and impact. We aim to acknowledge wit
 - Any way the `send_failed` / `escalated` outcomes could carry a signed transaction they should not.
 - Mismatches between the committed `dist/` and `src/`.
 
+## Threat model
+
+[`THREAT-MODEL.md`](THREAT-MODEL.md) states what the design protects, what it does not (no secure element, a compromised offline machine defeats it, a stolen session key is beyond local control), and how to set up an air gap properly.
+
 ## Status
 
 Beta. The signing core and policy engine are in scope for Coldstar's planned independent audit. Until it completes: devnet, small amounts, short `allowPrograms`. The non-System-program posture is documented in the README and at `classifyOpaqueProgram` in `src/adapter/parseTx.ts`.
