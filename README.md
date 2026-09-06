@@ -37,6 +37,8 @@ raw tx ──(project + parseTx, fail-closed)──▶ TxIntent ──(evaluate)
 | `src/wallet/simulate.test.ts` | ✅ 9 tests with an injected simulator |
 | `src/wallet/ledger.ts` | ✅ `FileSpendLedger` — the daily cap survives restarts; atomic writes, 0600, refuses to start from a corrupt file |
 | `src/wallet/ledger.test.ts` | ✅ 7 tests incl. cap-holds-across-wallet-restart |
+| `src/wallet/chainLedger.ts` | ✅ `ChainSpendLedger` — the day's spend read back from the chain, so `rm`-ing the local ledger cannot reset the cap |
+| `src/wallet/chainLedger.test.ts` | ✅ 7 tests incl. the delete-the-file attack |
 | `src/policy/envelope.ts` | ✅ the root-signed policy envelope: `signPolicyEnvelope`, `verifyPolicyEnvelope`, `parsePolicy` (strict schema) |
 | `src/cli/signPolicy.ts` | ✅ `coldstar-sign-policy` — run on the cold machine; emits the envelope |
 | `src/policy/envelope.test.ts` | ✅ 11 tests: tamper, wrong root, wrong session, expiry, canonical ordering, wallet refuses bad envelopes |
@@ -82,6 +84,8 @@ The same wallet as an MCP server. The model gets five tools and never a key; eve
 | `coldstar_sign` | Sign under policy. `signed` returns the signed tx; `escalated` returns the unsigned tx for the air-gapped device; `rejected` returns no bytes at all. |
 | `coldstar_sign_and_send` | As above, then broadcast if signed; an RPC failure returns `send_failed` with the reason instead of an error |
 | `coldstar_transfer_sol` | Build + evaluate + send a SOL transfer from the session wallet (`dry_run: true` for the verdict only) |
+
+Set `COLDSTAR_CHAIN_LEDGER=1` to put Solana behind the daily cap. The local file records everything this signer approved (including transactions that have not landed); the chain records everything that actually landed and cannot be deleted. The wallet uses the larger of the two, so an attacker who deletes the ledger file does not get a fresh daily allowance.
 
 The binary keeps the daily-spend ledger in `COLDSTAR_LEDGER` (default `./.coldstar-ledger.json`) so the cap survives restarts. `COLDSTAR_SESSION_KEYFILE` is a `solana-keygen`-style JSON byte array; `COLDSTAR_SESSION_KEY` (base58) also works. It is the **session** key. The root key has no environment variable because it never lives on this machine.
 

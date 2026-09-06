@@ -8,6 +8,8 @@ export { ColdstarWallet, ColdstarEscalation, ColdstarRejected, InMemorySpendLedg
 export { createColdstarMcpServer } from "./mcp/server.js";
 export { rpcSimulator } from "./wallet/simulate.js";
 export { FileSpendLedger } from "./wallet/ledger.js";
+export { ChainSpendLedger } from "./wallet/chainLedger.js";
+export type { ChainSpendLedgerOptions } from "./wallet/chainLedger.js";
 export { signPolicyEnvelope, verifyPolicyEnvelope, parsePolicy, isEnvelope, PolicySchema } from "./policy/envelope.js";
 export type { PolicyEnvelope, EnvelopeCheck } from "./policy/envelope.js";
 export type { Simulator, SimulationResult } from "./wallet/simulate.js";

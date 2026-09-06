@@ -32,6 +32,13 @@ export interface SpendLedger {
     get(): EvalState;
     /** Record a spend that was actually signed. */
     add(sol: number): void;
+    /**
+     * Optional: refresh from an external source before `get()` is trusted.
+     * Awaited by `evaluateTx` when present — see ChainSpendLedger, which reads
+     * the day's real spend off the chain so deleting a local file cannot reset
+     * the cap.
+     */
+    sync?(): Promise<void>;
 }
 export declare class InMemorySpendLedger implements SpendLedger {
     private readonly now;

@@ -26,6 +26,8 @@
 //   COLDSTAR_SESSION_KEY          or the base58 secret key
 //   COLDSTAR_ALLOW_MESSAGE_SIGNING  "1" to enable off-chain message signing (off by default)
 //   COLDSTAR_LEDGER               path of the persistent daily-spend ledger (default ./.coldstar-ledger.json)
+//   COLDSTAR_CHAIN_LEDGER         "1" to also derive the day's spend from on-chain history, so
+//                                 deleting the local ledger cannot reset the daily cap
 //   COLDSTAR_SIMULATE             "1" to simulate txs through allowlisted non-System programs and
 //                                 apply the measured debit to the limits; "always" to simulate every tx
 //
@@ -39,6 +41,7 @@ import bs58 from "bs58";
 import { ColdstarWallet } from "../wallet/coldstarWallet.js";
 import { rpcSimulator } from "../wallet/simulate.js";
 import { FileSpendLedger } from "../wallet/ledger.js";
+import { ChainSpendLedger } from "../wallet/chainLedger.js";
 import type { Policy } from "../policy/schema.js";
 import { isEnvelope, parsePolicy } from "../policy/envelope.js";
 import { createColdstarMcpServer } from "./server.js";
@@ -84,11 +87,18 @@ if (process.env.COLDSTAR_SESSION_KEYFILE) {
 }
 
 // The daily cap must survive restarts, so the MCP binary always uses a file ledger.
+// COLDSTAR_CHAIN_LEDGER=1 puts the chain behind it: deleting the local file then
+// cannot reset the cap, because the day's real spend is read back from Solana.
 const ledgerPath = process.env.COLDSTAR_LEDGER ?? ".coldstar-ledger.json";
+const fileLedger = new FileSpendLedger(ledgerPath);
+const chainLedger =
+  process.env.COLDSTAR_CHAIN_LEDGER === "1"
+    ? new ChainSpendLedger({ connection: rpcUrl, address: session.publicKey, local: fileLedger })
+    : undefined;
 const walletOpts = {
   session,
   rpcUrl,
-  ledger: new FileSpendLedger(ledgerPath),
+  ledger: chainLedger ?? fileLedger,
   allowMessageSigning: process.env.COLDSTAR_ALLOW_MESSAGE_SIGNING === "1",
   // COLDSTAR_SIMULATE=1 turns on simulation-based accounting for transactions
   // that touch allowlisted non-System programs (posture (b)); "always" simulates everything.
@@ -113,4 +123,4 @@ if (envelopeMode && !expectedRoot) {
 
 const server = createColdstarMcpServer({ wallet, policy, rpcUrl });
 await server.connect(new StdioServerTransport());
-process.stderr.write(`[coldstar] MCP signer up. session=${session.publicKey.toBase58()} rpc=${rpcUrl}` + (wallet.envelope ? ` policy signed by root ${wallet.envelope.rootPubkey}` + (wallet.envelope.expiresAt ? ` until ${wallet.envelope.expiresAt}` : "") : " policy UNSIGNED (devnet only)") + `\n`);
+process.stderr.write(`[coldstar] MCP signer up. session=${session.publicKey.toBase58()} rpc=${rpcUrl}` + (wallet.envelope ? ` policy signed by root ${wallet.envelope.rootPubkey}` + (wallet.envelope.expiresAt ? ` until ${wallet.envelope.expiresAt}` : "") : " policy UNSIGNED (devnet only)") + (chainLedger ? " chain-backed ledger" : "") + `\n`);

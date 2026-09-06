@@ -146,6 +146,9 @@ export class ColdstarWallet {
      * records on AUTO_SIGN.
      */
     async evaluateTx(tx, extraSpendSol = 0) {
+        // A ledger backed by an external source (the chain) refreshes here, before
+        // any verdict reads it.
+        await this.ledger.sync?.();
         const v = this.verdict(tx, extraSpendSol);
         if (!this.preflight || v.decision === "REJECT" || !v.intent)
             return v;

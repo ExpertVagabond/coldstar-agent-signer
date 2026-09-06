@@ -76,6 +76,13 @@ export interface SpendLedger {
   get(): EvalState;
   /** Record a spend that was actually signed. */
   add(sol: number): void;
+  /**
+   * Optional: refresh from an external source before `get()` is trusted.
+   * Awaited by `evaluateTx` when present — see ChainSpendLedger, which reads
+   * the day's real spend off the chain so deleting a local file cannot reset
+   * the cap.
+   */
+  sync?(): Promise<void>;
 }
 
 export class InMemorySpendLedger implements SpendLedger {
@@ -229,6 +236,9 @@ export class ColdstarWallet implements BaseWalletLike {
    * records on AUTO_SIGN.
    */
   async evaluateTx(tx: SolanaTx, extraSpendSol = 0): Promise<Verdict> {
+    // A ledger backed by an external source (the chain) refreshes here, before
+    // any verdict reads it.
+    await this.ledger.sync?.();
     const v = this.verdict(tx, extraSpendSol);
     if (!this.preflight || v.decision === "REJECT" || !v.intent) return v;
     const opaque = v.intent.instructions.some((ix) => ix.programId !== SYSTEM_PROGRAM_ID);
