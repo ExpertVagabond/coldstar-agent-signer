@@ -43,6 +43,9 @@ raw tx ──(project + parseTx, fail-closed)──▶ TxIntent ──(evaluate)
 | `src/wallet/chainLedger.test.ts` | ✅ 7 tests incl. the delete-the-file attack |
 | `src/policy/envelope.ts` | ✅ the root-signed policy envelope: `signPolicyEnvelope`, `verifyPolicyEnvelope`, `parsePolicy` (strict schema) |
 | `src/cli/signPolicy.ts` | ✅ `coldstar-sign-policy` — run on the cold machine; emits the envelope |
+| `tools/coldstar_sign_policy.py` | ✅ the same signer in Python with **no dependencies**, for an offline machine that has no Node |
+| `ENVELOPE-SPEC.md` | ✅ the wire format, so any language can produce a valid envelope |
+| `src/policy/crossLanguage.test.ts` | ✅ 7 tests: the Python output verifies in TypeScript, and both sign identical bytes |
 | `src/policy/revocation.ts` | ✅ on-chain revocation: signed memo marker, `RevocationChecker`, fail-closed |
 | `src/policy/airgap.ts` | ✅ the cold-side tool refuses to read the root key on a networked machine |
 | `THREAT-MODEL.md` | ✅ what this protects, what it does not, and how to build an air gap that earns the name |
@@ -75,7 +78,20 @@ Turn the check on with `checkRevocation: true` (or `COLDSTAR_CHECK_REVOCATION=1`
 
 **Be clear about what this stops.** It stops a compromised *agent*, which is the case this package exists for: a prompt-injected agent proposes transactions through the signer, and a revoked grant refuses all of them. It does **not** stop someone who has stolen the session *secret key*. They do not need this package at all; they can sign with web3.js directly, and no off-chain control can stop them. The answer to a stolen key is to keep funds behind an on-chain program that enforces membership itself, which on Solana today means [Squads](https://squads.so) spending limits. We would rather say that plainly than let it be assumed.
 
-In code: `ColdstarWallet.fromEnvelope({ envelope, expectedRoot, session, rpcUrl, checkRevocation: true })`. A bare, unsigned `coldstar.policy.json` still works for tests and devnet; set `COLDSTAR_REQUIRE_ENVELOPE=1` anywhere it matters.
+In code: `ColdstarWallet.fromEnvelope({ envelope, expectedRoot, session, rpcUrl, checkRevocation: true })`.
+
+### No Node on the air-gapped machine?
+
+A machine that earns the name is usually a minimal install or a read-only live image. Those have `python3`; they often do not have Node, and `pip install` wants the network you just removed. So the same signer ships as one dependency-free Python file:
+
+```bash
+./tools/coldstar_sign_policy.py --root root.json --policy coldstar.policy.json \
+  --session <session pubkey> --expires 7d > envelope.json
+```
+
+It produces byte-identical envelopes, uses PyNaCl when installed and a vendored RFC 8032 Ed25519 otherwise, and runs the same air-gap check. The format is written down in [`ENVELOPE-SPEC.md`](ENVELOPE-SPEC.md) so a third implementation is possible; `src/policy/crossLanguage.test.ts` runs the real script and verifies its output with the real verifier, and asserts both languages sign the same bytes.
+
+The vendored fallback is not constant-time. That is stated in the file and is the reason it is scoped to the air-gapped machine, where there is no attacker present to observe timing. A bare, unsigned `coldstar.policy.json` still works for tests and devnet; set `COLDSTAR_REQUIRE_ENVELOPE=1` anywhere it matters.
 
 ## Use it from any MCP client (Claude, Cursor, …)
 

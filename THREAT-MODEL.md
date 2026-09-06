@@ -33,7 +33,7 @@ Switching Wi-Fi off in software is not an air gap. Neither is a machine you also
 A setup that earns the name:
 
 1. **A dedicated machine.** An old laptop with the wireless card physically removed, or a Raspberry Pi that has never been on a network. Not the machine you read email on.
-2. **A fresh install.** Ideally a live USB image booted read-only, so nothing persists between sessions and there is nowhere for a keylogger to live.
+2. **A fresh install.** Ideally a live USB image booted read-only, so nothing persists between sessions and there is nowhere for a keylogger to live. `tools/coldstar_sign_policy.py` needs only `python3`, so the offline machine does not need Node or a package install.
 3. **Nothing else on it.** Every package you add is code that runs next to your key.
 4. **Data crosses as data, not as a device you re-plug.** QR is the good pattern: a camera reads pixels and cannot mount a filesystem. If you use a USB drive, treat it as one-directional and never carry it back to the offline machine after it has been in an online one.
 5. **Type the passphrase on the offline machine only.** It should never exist on a networked device, including in a password manager that syncs.
