@@ -7,6 +7,7 @@ export declare class FileSpendLedger implements SpendLedger {
     constructor(path: string, now?: () => Date);
     get(): EvalState;
     add(sol: number): void;
+    addToken(mint: string, baseUnits: bigint): void;
     private roll;
     private load;
     private persist;

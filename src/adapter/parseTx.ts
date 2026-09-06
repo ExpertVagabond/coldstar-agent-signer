@@ -18,9 +18,13 @@
 // without a validator. `fromKitTransaction()` at the bottom is the only seam
 // that touches a real SDK shape.
 
-import { TxIntent, TxInstruction, LAMPORTS_PER_SOL } from "../policy/schema.js";
+import { TxIntent, TxInstruction, TokenMovement, LAMPORTS_PER_SOL } from "../policy/schema.js";
 
 export const SYSTEM_PROGRAM_ID = "11111111111111111111111111111111";
+export const TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+export const TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+export const ASSOCIATED_TOKEN_PROGRAM_ID = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
+const TOKEN_PROGRAMS = new Set([TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]);
 
 /**
  * The subset of a decompiled message this decoder needs. Deliberately
@@ -137,6 +141,115 @@ function decodeSystemIx(
   };
 }
 
+/*
+ * ── SPL TOKEN ───────────────────────────────────────────────────────────────
+ * Token instructions use a ONE-byte discriminant (System uses four).
+ *
+ * The reason this decoder exists: allowlisting the Token program so an agent
+ * can move USDC used to switch off every amount control, because the SOL
+ * limits count lamports and a token transfer moves none. Worse, an `Approve`
+ * hands a delegate open-ended authority to drain the account later without any
+ * further signing — a total bypass that would have looked like an ordinary
+ * allowlisted instruction.
+ *
+ * So: decode what can be bounded, and refuse the rest. Refusing means
+ * `{ ok: false }`, which the caller turns into ESCALATE — a human looks at it.
+ */
+const TOK_TRANSFER = 3;
+const TOK_TRANSFER_CHECKED = 12;
+
+/** Token instructions that move nothing and grant nothing. */
+const TOK_NON_VALUE = new Set([
+  1,  // InitializeAccount
+  5,  // Revoke — removes a delegate; strictly reduces authority
+  16, // InitializeAccount2
+  17, // SyncNative
+  18, // InitializeAccount3
+  22, // InitializeImmutableOwner
+]);
+
+/** Named so the escalation reason can say what the agent actually asked for. */
+const TOK_DANGEROUS: Record<number, string> = {
+  4: "Approve (delegates open-ended spending authority)",
+  13: "ApproveChecked (delegates open-ended spending authority)",
+  6: "SetAuthority (hands over control of the account)",
+  7: "MintTo",
+  14: "MintToChecked",
+  8: "Burn",
+  15: "BurnChecked",
+  9: "CloseAccount (drains the account and its rent)",
+  23: "AmountToUiAmount",
+};
+
+function readU64(data: Uint8Array, offset: number): bigint | undefined {
+  if (data.length < offset + 8) return undefined;
+  return new DataView(data.buffer, data.byteOffset + offset, 8).getBigUint64(0, true);
+}
+
+/**
+ * Decode one SPL Token instruction.
+ *
+ * Account layouts:
+ *   Transfer         [source, destination, authority]
+ *   TransferChecked  [source, mint, destination, authority]
+ *
+ * Only movements the FEE PAYER authorises count: tokens leaving an account we
+ * do not control are not our exposure.
+ */
+function decodeTokenIx(
+  ix: CompiledInstruction,
+  feePayer: string,
+): { ok: true; value: TxInstruction; movement?: TokenMovement } | { ok: false; reason: string } {
+  const data = ix.data;
+  if (!data || data.length < 1) return { ok: false, reason: "token instruction has no data" };
+  const disc = data[0] as number;
+  const self: TxInstruction = { programId: ix.programAddress };
+
+  if (TOK_NON_VALUE.has(disc)) return { ok: true, value: self };
+
+  const danger = TOK_DANGEROUS[disc];
+  if (danger) {
+    return { ok: false, reason: `token instruction ${disc}: ${danger} — cannot be bounded by an amount limit` };
+  }
+
+  if (disc !== TOK_TRANSFER && disc !== TOK_TRANSFER_CHECKED) {
+    return { ok: false, reason: `unknown token instruction discriminant ${disc}` };
+  }
+
+  const amount = readU64(data, 1);
+  if (amount === undefined) return { ok: false, reason: `token instruction ${disc} has no amount field` };
+
+  const accounts = ix.accounts ?? [];
+  const checked = disc === TOK_TRANSFER_CHECKED;
+  const source = accounts[0]?.address;
+  const mint = checked ? accounts[1]?.address : undefined;
+  const destination = checked ? accounts[2]?.address : accounts[1]?.address;
+  const authority = checked ? accounts[3]?.address : accounts[2]?.address;
+
+  if (source === undefined || destination === undefined || authority === undefined) {
+    return { ok: false, reason: `token instruction ${disc} is missing accounts` };
+  }
+  // Someone else's tokens moving under their own authority is not our exposure.
+  if (authority !== feePayer) return { ok: true, value: self };
+
+  if (!checked) {
+    // A bare Transfer does not carry the mint, so the asset cannot be identified
+    // statically and `allowTokens` cannot be applied. Refuse rather than guess.
+    return {
+      ok: false,
+      reason: "token Transfer does not name a mint; use TransferChecked so the policy can identify the asset",
+    };
+  }
+
+  if (mint === undefined) return { ok: false, reason: "TransferChecked is missing its mint account" };
+  const decimals = data.length >= 10 ? (data[9] as number) : undefined;
+  return {
+    ok: true,
+    value: self,
+    movement: { mint, amount, ...(decimals !== undefined ? { decimals } : {}), destination, source },
+  };
+}
+
 /**
  * ── DECISION SEAM ────────────────────────────────────────────────────────────
  * How to treat an instruction for a program that is NOT the System Program.
@@ -188,13 +301,16 @@ export function parseTx(message: DecompiledMessage): ParseResult {
   }
 
   const instructions: TxInstruction[] = [];
+  const tokenMovements: TokenMovement[] = [];
   let outLamports = 0n;
 
   for (const ix of message.instructions) {
-    const decoded =
+    const decoded: { ok: true; value: TxInstruction; movement?: TokenMovement } | { ok: false; reason: string } =
       ix.programAddress === SYSTEM_PROGRAM_ID
         ? decodeSystemIx(ix, message.feePayer)
-        : classifyOpaqueProgram(ix);
+        : TOKEN_PROGRAMS.has(ix.programAddress)
+          ? decodeTokenIx(ix, message.feePayer)
+          : classifyOpaqueProgram(ix);
 
     if (!decoded.ok) return { ok: false, reason: decoded.reason };
 
@@ -202,6 +318,7 @@ export function parseTx(message: DecompiledMessage): ParseResult {
     if (decoded.value.lamports !== undefined) {
       outLamports += BigInt(decoded.value.lamports);
     }
+    if (decoded.movement) tokenMovements.push(decoded.movement);
   }
 
   // Distinct destinations, in first-seen order, for the allowlist/blocklist checks.
@@ -219,6 +336,7 @@ export function parseTx(message: DecompiledMessage): ParseResult {
       instructions,
       outSol: Number(outLamports) / LAMPORTS_PER_SOL,
       recipients,
+      tokenMovements,
     },
   };
 }

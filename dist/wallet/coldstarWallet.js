@@ -26,26 +26,33 @@ import { isVersionedTransaction, projectTransaction } from "./project.js";
 import { SYSTEM_PROGRAM_ID } from "../adapter/parseTx.js";
 import { verifyPolicyEnvelope } from "../policy/envelope.js";
 import { RevocationChecker } from "../policy/revocation.js";
+import { expandTokenAccounts } from "./tokens.js";
 export class InMemorySpendLedger {
     now;
     day = utcDay();
     spent = 0;
+    byMint = new Map();
     constructor(now = () => new Date()) {
         this.now = now;
     }
     get() {
         this.roll();
-        return { dailySpentSol: this.spent };
+        return { dailySpentSol: this.spent, dailySpentByMint: Object.fromEntries([...this.byMint].map(([k, v]) => [k, v.toString()])) };
     }
     add(sol) {
         this.roll();
         this.spent += sol;
+    }
+    addToken(mint, baseUnits) {
+        this.roll();
+        this.byMint.set(mint, (this.byMint.get(mint) ?? 0n) + baseUnits);
     }
     roll() {
         const d = utcDay(this.now());
         if (d !== this.day) {
             this.day = d;
             this.spent = 0;
+            this.byMint.clear();
         }
     }
 }
@@ -119,7 +126,9 @@ export class ColdstarWallet {
     }
     constructor(opts, envelope) {
         this.envelope = envelope;
-        this.policy = opts.policy;
+        // Evaluation uses a copy whose allowTokenAccounts includes the derived
+        // associated token accounts. The signed policy itself is never modified.
+        this.policy = expandTokenAccounts(opts.policy);
         this.session = opts.session;
         this.publicKey = opts.session.publicKey;
         this.rpcUrl = opts.rpcUrl;
@@ -142,9 +151,7 @@ export class ColdstarWallet {
         if (!parsed.ok)
             return { decision: "ESCALATE", reason: parsed.reason, intent: undefined };
         const state = this.ledger.get();
-        const r = evaluate(parsed.intent, this.policy, {
-            dailySpentSol: state.dailySpentSol + extraSpendSol,
-        });
+        const r = evaluate(parsed.intent, this.policy, { ...state, dailySpentSol: state.dailySpentSol + extraSpendSol });
         return { decision: r.decision, reason: r.reason, intent: parsed.intent };
     }
     /** SOL signed so far in the current UTC day, per the ledger. */
@@ -190,7 +197,7 @@ export class ColdstarWallet {
             return v; // static accounting already covers it
         const intent = { ...v.intent, outSol: simulatedSol };
         const state = this.ledger.get();
-        const r = evaluate(intent, this.policy, { dailySpentSol: state.dailySpentSol + extraSpendSol });
+        const r = evaluate(intent, this.policy, { ...state, dailySpentSol: state.dailySpentSol + extraSpendSol });
         return { decision: r.decision, reason: `${r.reason} (simulated debit ${simulatedSol} SOL)`, intent };
     }
     async signTransaction(transaction) {
@@ -233,7 +240,7 @@ export class ColdstarWallet {
             this.onDecision?.(v);
             if (v.decision === "AUTO_SIGN") {
                 this.signWithSession(tx);
-                this.ledger.add(v.intent?.outSol ?? 0);
+                this.recordSpend(v);
                 out.push(tx);
                 continue;
             }
@@ -243,7 +250,7 @@ export class ColdstarWallet {
                 throw new ColdstarEscalation(v.reason, v.intent, serializeUnsigned(tx));
             }
             // A human approved it on the cold side; count the spend, pass it through.
-            this.ledger.add(v.intent?.outSol ?? 0);
+            this.recordSpend(v);
             out.push(approved);
         }
         return out;
@@ -265,6 +272,14 @@ export class ColdstarWallet {
             throw new ColdstarRejected(reason, undefined);
         }
         return nacl.sign.detached(message, this.session.secretKey);
+    }
+    /** Record what a signed transaction actually moved: SOL, and each token. */
+    recordSpend(v) {
+        this.ledger.add(v.intent?.outSol ?? 0);
+        for (const m of v.intent?.tokenMovements ?? []) {
+            if (m.mint && m.amount > 0n)
+                this.ledger.addToken?.(m.mint, m.amount);
+        }
     }
     /** True if `tx` already carries a valid signature by the session key over its current message. */
     alreadySignedBySession(tx) {

@@ -33,6 +33,8 @@ export interface SpendLedger {
     get(): EvalState;
     /** Record a spend that was actually signed. */
     add(sol: number): void;
+    /** Record SPL base units of `mint` that were actually signed. */
+    addToken?(mint: string, baseUnits: bigint): void;
     /**
      * Optional: refresh from an external source before `get()` is trusted.
      * Awaited by `evaluateTx` when present — see ChainSpendLedger, which reads
@@ -45,9 +47,11 @@ export declare class InMemorySpendLedger implements SpendLedger {
     private readonly now;
     private day;
     private spent;
+    private byMint;
     constructor(now?: () => Date);
     get(): EvalState;
     add(sol: number): void;
+    addToken(mint: string, baseUnits: bigint): void;
     private roll;
 }
 export declare class ColdstarRejected extends Error {
@@ -163,6 +167,8 @@ export declare class ColdstarWallet implements BaseWalletLike {
         signature: TransactionSignature;
     }>;
     signMessage(message: Uint8Array): Promise<Uint8Array>;
+    /** Record what a signed transaction actually moved: SOL, and each token. */
+    private recordSpend;
     /** True if `tx` already carries a valid signature by the session key over its current message. */
     private alreadySignedBySession;
     private signWithSession;

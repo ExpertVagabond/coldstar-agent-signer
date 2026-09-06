@@ -11,7 +11,12 @@ import { Policy, TxIntent, EvalState, EvalResult } from "./schema.js";
  *   4) amount over the per-tx limit        -> ESCALATE
  *   5) recipient not allowlisted (value tx)-> ESCALATE
  *   6) daily cap would be exceeded         -> ESCALATE
- *   7) otherwise                           -> AUTO_SIGN
+ *   7) SPL token rules (see below)          -> ESCALATE
+ *   8) otherwise                           -> AUTO_SIGN
+ *
+ * Token rules exist because allowlisting the Token program so an agent can pay
+ * in USDC used to disable every amount control: the SOL limits count lamports,
+ * and a token transfer moves none.
  *
  * The agent NEVER holds the root key. AUTO_SIGN uses a policy-gated session
  * signer; ESCALATE hands an unsigned tx to the cold device (QR/air-gap);

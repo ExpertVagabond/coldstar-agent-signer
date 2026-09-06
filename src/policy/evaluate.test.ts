@@ -20,7 +20,7 @@ const policy: Policy = {
 const fresh: EvalState = { dailySpentSol: 0 };
 
 function intent(o: Partial<TxIntent>): TxIntent {
-  return { instructions: [{ programId: SYSTEM }], outSol: 0, recipients: [], ...o };
+  return { tokenMovements: [], instructions: [{ programId: SYSTEM }], outSol: 0, recipients: [], ...o };
 }
 
 describe("evaluate()", () => {

@@ -60,6 +60,8 @@ export const PolicySchema = z.object({
     allowPrograms: z.array(z.string().min(32).max(44)),
     allowRecipients: z.array(z.string().min(32).max(44)),
     allowTokens: z.array(z.string()),
+    tokenLimits: z.record(z.string(), z.object({ perTx: z.string().optional(), daily: z.string().optional() }).strict()).optional(),
+    allowTokenAccounts: z.array(z.string().min(32).max(44)).optional(),
     blockRecipients: z.array(z.string().min(32).max(44)),
     escalateAboveSol: z.number().nonnegative(),
 }).strict();
@@ -70,7 +72,14 @@ export function parsePolicy(raw) {
         const first = r.error.issues[0];
         throw new Error(`policy invalid at ${first?.path.join(".") || "<root>"}: ${first?.message}`);
     }
-    return r.data;
+    // Rebuild rather than cast: under exactOptionalPropertyTypes an absent optional
+    // and one set to undefined are different types, and zod produces the latter.
+    const { tokenLimits, allowTokenAccounts, ...rest } = r.data;
+    return {
+        ...rest,
+        ...(tokenLimits ? { tokenLimits } : {}),
+        ...(allowTokenAccounts ? { allowTokenAccounts } : {}),
+    };
 }
 const EnvelopeSchema = z.object({
     version: z.union([z.literal(1), z.literal(2)]),

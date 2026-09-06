@@ -1,6 +1,7 @@
 export * from "./policy/schema.js";
 export { evaluate } from "./policy/evaluate.js";
-export { parseTx, fromKitTransaction, SYSTEM_PROGRAM_ID } from "./adapter/parseTx.js";
+export { parseTx, fromKitTransaction, SYSTEM_PROGRAM_ID, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "./adapter/parseTx.js";
+export { expandTokenAccounts, associatedTokenAddress } from "./wallet/tokens.js";
 export { projectTransaction, isVersionedTransaction } from "./wallet/project.js";
 export { ColdstarWallet, ColdstarEscalation, ColdstarRejected, InMemorySpendLedger, } from "./wallet/coldstarWallet.js";
 export { createColdstarMcpServer } from "./mcp/server.js";

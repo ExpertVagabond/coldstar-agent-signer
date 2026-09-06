@@ -15,6 +15,17 @@ export declare const PolicySchema: z.ZodObject<{
     allowPrograms: z.ZodArray<z.ZodString, "many">;
     allowRecipients: z.ZodArray<z.ZodString, "many">;
     allowTokens: z.ZodArray<z.ZodString, "many">;
+    tokenLimits: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
+        perTx: z.ZodOptional<z.ZodString>;
+        daily: z.ZodOptional<z.ZodString>;
+    }, "strict", z.ZodTypeAny, {
+        perTx?: string | undefined;
+        daily?: string | undefined;
+    }, {
+        perTx?: string | undefined;
+        daily?: string | undefined;
+    }>>>;
+    allowTokenAccounts: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
     blockRecipients: z.ZodArray<z.ZodString, "many">;
     escalateAboveSol: z.ZodNumber;
 }, "strict", z.ZodTypeAny, {
@@ -28,6 +39,11 @@ export declare const PolicySchema: z.ZodObject<{
     allowTokens: string[];
     blockRecipients: string[];
     escalateAboveSol: number;
+    tokenLimits?: Record<string, {
+        perTx?: string | undefined;
+        daily?: string | undefined;
+    }> | undefined;
+    allowTokenAccounts?: string[] | undefined;
 }, {
     version: 1;
     limits: {
@@ -39,6 +55,11 @@ export declare const PolicySchema: z.ZodObject<{
     allowTokens: string[];
     blockRecipients: string[];
     escalateAboveSol: number;
+    tokenLimits?: Record<string, {
+        perTx?: string | undefined;
+        daily?: string | undefined;
+    }> | undefined;
+    allowTokenAccounts?: string[] | undefined;
 }>;
 /** Parse and validate a bare policy. Throws with the first problem; never returns a partial policy. */
 export declare function parsePolicy(raw: unknown): Policy;

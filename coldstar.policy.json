@@ -13,10 +13,17 @@
     "<recipient-allow pubkey \u2014 fill from setup>"
   ],
   "allowTokens": [
-    "SOL"
+    "SOL",
+    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
   ],
   "blockRecipients": [
     "<recipient-bad pubkey \u2014 fill from setup>"
   ],
-  "escalateAboveSol": 0.1
+  "escalateAboveSol": 0.1,
+  "tokenLimits": {
+    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": {
+      "perTx": "25000000",
+      "daily": "100000000"
+    }
+  }
 }

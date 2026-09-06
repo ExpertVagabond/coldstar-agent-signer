@@ -18,6 +18,8 @@ interface LedgerFile {
   version: 1;
   day: string; // UTC YYYY-MM-DD
   spentSol: number;
+  /** Base units spent per mint today, as decimal strings (never floats). */
+  spentByMint?: Record<string, string>;
   updatedAt: string;
 }
 
@@ -37,7 +39,7 @@ export class FileSpendLedger implements SpendLedger {
 
   get(): EvalState {
     this.roll();
-    return { dailySpentSol: this.state.spentSol };
+    return { dailySpentSol: this.state.spentSol, dailySpentByMint: { ...(this.state.spentByMint ?? {}) } };
   }
 
   add(sol: number): void {
@@ -47,10 +49,18 @@ export class FileSpendLedger implements SpendLedger {
     this.persist();
   }
 
+  addToken(mint: string, baseUnits: bigint): void {
+    if (baseUnits < 0n) throw new Error(`ledger: refusing to record ${baseUnits} of ${mint}`);
+    this.roll();
+    const by = (this.state.spentByMint ??= {});
+    by[mint] = (BigInt(by[mint] ?? "0") + baseUnits).toString();
+    this.persist();
+  }
+
   private roll(): void {
     const day = utcDay(this.now());
     if (day !== this.state.day) {
-      this.state = { version: 1, day, spentSol: 0, updatedAt: this.now().toISOString() };
+      this.state = { version: 1, day, spentSol: 0, spentByMint: {}, updatedAt: this.now().toISOString() };
       this.persist();
     }
   }
@@ -73,7 +83,14 @@ export class FileSpendLedger implements SpendLedger {
     ) {
       throw new Error(`ledger: ${this.path} has an unexpected shape. Refusing to start from 0; delete it deliberately to reset.`);
     }
-    return { version: 1, day: p.day, spentSol: p.spentSol, updatedAt: typeof p.updatedAt === "string" ? p.updatedAt : "" };
+    const byMint: Record<string, string> = {};
+    for (const [k, v] of Object.entries(p.spentByMint ?? {})) {
+      if (typeof v !== "string" || !/^\d+$/.test(v)) {
+        throw new Error(`ledger: ${this.path} has a non-integer amount for mint ${k}. Refusing to start; delete it deliberately to reset.`);
+      }
+      byMint[k] = v;
+    }
+    return { version: 1, day: p.day, spentSol: p.spentSol, spentByMint: byMint, updatedAt: typeof p.updatedAt === "string" ? p.updatedAt : "" };
   }
 
   private persist(): void {

@@ -1,5 +1,8 @@
 import { TxIntent } from "../policy/schema.js";
 export declare const SYSTEM_PROGRAM_ID = "11111111111111111111111111111111";
+export declare const TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+export declare const TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+export declare const ASSOCIATED_TOKEN_PROGRAM_ID = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 /**
  * The subset of a decompiled message this decoder needs. Deliberately
  * structural: it matches @solana/kit's decompiled instruction shape

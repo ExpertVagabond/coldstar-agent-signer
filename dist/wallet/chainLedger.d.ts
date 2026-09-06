@@ -19,6 +19,8 @@ export declare class ChainSpendLedger implements SpendLedger {
     private readonly now;
     /** Lamports debited from `address` today, per the chain, by signature. */
     private counted;
+    /** Token base units debited today, by signature then mint. */
+    private countedTokens;
     private countedDay;
     /** Set when the most recent sync could not reach the chain. Callers should log it. */
     lastSyncError: string | undefined;
@@ -31,7 +33,10 @@ export declare class ChainSpendLedger implements SpendLedger {
     sync(): Promise<void>;
     /** SOL debited from the session wallet today, per the chain alone. */
     chainSpentSol(): number;
+    /** Base units debited per mint today, per the chain alone. */
+    chainSpentByMint(): Record<string, bigint>;
     get(): EvalState;
     add(sol: number): void;
+    addToken(mint: string, baseUnits: bigint): void;
 }
 //# sourceMappingURL=chainLedger.d.ts.map

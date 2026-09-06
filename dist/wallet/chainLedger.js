@@ -33,6 +33,8 @@ export class ChainSpendLedger {
     now;
     /** Lamports debited from `address` today, per the chain, by signature. */
     counted = new Map();
+    /** Token base units debited today, by signature then mint. */
+    countedTokens = new Map();
     countedDay = 0;
     /** Set when the most recent sync could not reach the chain. Callers should log it. */
     lastSyncError;
@@ -52,6 +54,7 @@ export class ChainSpendLedger {
         const dayStart = utcDayStart(this.now());
         if (dayStart !== this.countedDay) {
             this.counted.clear();
+            this.countedTokens.clear();
             this.countedDay = dayStart;
         }
         try {
@@ -77,6 +80,26 @@ export class ChainSpendLedger {
                     const pre = BigInt(tx.meta.preBalances[idx] ?? 0);
                     const post = BigInt(tx.meta.postBalances[idx] ?? 0);
                     this.counted.set(sig, pre > post ? pre - post : 0n);
+                    // Token debits come from the pre/post token balances the RPC already
+                    // returned, so USDC is counted from the chain exactly like SOL.
+                    const owned = (rows) => {
+                        const m = new Map();
+                        for (const r of rows ?? []) {
+                            if (r.owner !== this.address.toBase58())
+                                continue;
+                            m.set(r.mint, (m.get(r.mint) ?? 0n) + BigInt(r.uiTokenAmount.amount));
+                        }
+                        return m;
+                    };
+                    const preTok = owned(tx.meta.preTokenBalances);
+                    const postTok = owned(tx.meta.postTokenBalances);
+                    const debits = new Map();
+                    for (const [mint, before] of preTok) {
+                        const after = postTok.get(mint) ?? 0n;
+                        if (before > after)
+                            debits.set(mint, before - after);
+                    }
+                    this.countedTokens.set(sig, debits);
                 });
             }
             this.lastSyncError = undefined;
@@ -92,12 +115,31 @@ export class ChainSpendLedger {
             total += v;
         return Number(total) / LAMPORTS_PER_SOL;
     }
+    /** Base units debited per mint today, per the chain alone. */
+    chainSpentByMint() {
+        const total = new Map();
+        for (const perTx of this.countedTokens.values()) {
+            for (const [mint, amt] of perTx)
+                total.set(mint, (total.get(mint) ?? 0n) + amt);
+        }
+        return Object.fromEntries(total);
+    }
     get() {
-        const localSol = this.local.get().dailySpentSol;
-        return { dailySpentSol: Math.max(localSol, this.chainSpentSol()) };
+        const local = this.local.get();
+        // max() per asset, for the same reason as SOL: local sees what has not
+        // landed, the chain sees what cannot be erased, and neither may lower the other.
+        const merged = { ...(local.dailySpentByMint ?? {}) };
+        for (const [mint, chainAmt] of Object.entries(this.chainSpentByMint())) {
+            const localAmt = BigInt(merged[mint] ?? "0");
+            merged[mint] = (chainAmt > localAmt ? chainAmt : localAmt).toString();
+        }
+        return { dailySpentSol: Math.max(local.dailySpentSol, this.chainSpentSol()), dailySpentByMint: merged };
     }
     add(sol) {
         this.local.add(sol);
+    }
+    addToken(mint, baseUnits) {
+        this.local.addToken?.(mint, baseUnits);
     }
 }
 //# sourceMappingURL=chainLedger.js.map

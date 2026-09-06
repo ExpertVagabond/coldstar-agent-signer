@@ -99,6 +99,8 @@ export function createColdstarMcpServer(opts) {
                 allowPrograms: z.array(z.string()),
                 allowRecipients: z.array(z.string()),
                 allowTokens: z.array(z.string()),
+                tokenLimits: z.record(z.string(), z.object({ perTx: z.string().optional(), daily: z.string().optional() })).optional(),
+                allowTokenAccounts: z.array(z.string()).optional(),
                 blockRecipients: z.array(z.string()),
                 escalateAboveSol: z.number(),
             }),

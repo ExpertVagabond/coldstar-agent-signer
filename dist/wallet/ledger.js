@@ -24,7 +24,7 @@ export class FileSpendLedger {
     }
     get() {
         this.roll();
-        return { dailySpentSol: this.state.spentSol };
+        return { dailySpentSol: this.state.spentSol, dailySpentByMint: { ...(this.state.spentByMint ?? {}) } };
     }
     add(sol) {
         if (!(sol >= 0) || !Number.isFinite(sol))
@@ -33,10 +33,18 @@ export class FileSpendLedger {
         this.state.spentSol += sol;
         this.persist();
     }
+    addToken(mint, baseUnits) {
+        if (baseUnits < 0n)
+            throw new Error(`ledger: refusing to record ${baseUnits} of ${mint}`);
+        this.roll();
+        const by = (this.state.spentByMint ??= {});
+        by[mint] = (BigInt(by[mint] ?? "0") + baseUnits).toString();
+        this.persist();
+    }
     roll() {
         const day = utcDay(this.now());
         if (day !== this.state.day) {
-            this.state = { version: 1, day, spentSol: 0, updatedAt: this.now().toISOString() };
+            this.state = { version: 1, day, spentSol: 0, spentByMint: {}, updatedAt: this.now().toISOString() };
             this.persist();
         }
     }
@@ -57,7 +65,14 @@ export class FileSpendLedger {
             typeof p.spentSol !== "number" || !Number.isFinite(p.spentSol) || p.spentSol < 0) {
             throw new Error(`ledger: ${this.path} has an unexpected shape. Refusing to start from 0; delete it deliberately to reset.`);
         }
-        return { version: 1, day: p.day, spentSol: p.spentSol, updatedAt: typeof p.updatedAt === "string" ? p.updatedAt : "" };
+        const byMint = {};
+        for (const [k, v] of Object.entries(p.spentByMint ?? {})) {
+            if (typeof v !== "string" || !/^\d+$/.test(v)) {
+                throw new Error(`ledger: ${this.path} has a non-integer amount for mint ${k}. Refusing to start; delete it deliberately to reset.`);
+            }
+            byMint[k] = v;
+        }
+        return { version: 1, day: p.day, spentSol: p.spentSol, spentByMint: byMint, updatedAt: typeof p.updatedAt === "string" ? p.updatedAt : "" };
     }
     persist() {
         this.state.updatedAt = this.now().toISOString();

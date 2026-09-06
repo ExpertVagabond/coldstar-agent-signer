@@ -26,6 +26,8 @@ raw tx ──(project + parseTx, fail-closed)──▶ TxIntent ──(evaluate)
 | `coldstar.policy.json` | ✅ example policy (fill the pubkeys) |
 | `src/adapter/parseTx.ts` | ✅ decoder: decompiled message → `TxIntent`, fail-closed |
 | `src/adapter/parseTx.test.ts` | ✅ 17 unit tests incl. the fail-closed cases |
+| `src/wallet/tokens.ts` | ✅ associated-token-account derivation, verified against `@solana/spl-token` |
+| `src/policy/tokens.test.ts` | ✅ 25 tests built with the real SPL library: the USDC hole, Approve, per-mint caps |
 | `src/wallet/project.ts` | ✅ web3.js `Transaction`/`VersionedTransaction` → `DecompiledMessage`; fail-closed on lookup-table accounts |
 | `src/wallet/coldstarWallet.ts` | ✅ `ColdstarWallet` — drop-in for Solana Agent Kit's `BaseWallet` (structurally typed, no framework dependency) |
 | `src/wallet/coldstarWallet.test.ts` | ✅ 17 tests: the three decisions, daily cap, batch atomicity, fail-closed edges |
@@ -114,6 +116,19 @@ npm install coldstar-agent-signer @solana/web3.js tweetnacl
 `@solana/web3.js` and `tweetnacl` are peer dependencies (Solana Agent Kit already brings both). Published on npm as `coldstar-agent-signer` (unscoped); `npm install github:ExpertVagabond/coldstar-agent-signer` also works and tracks main.
 
 **Status: beta, devnet.** The signing core and policy engine are in scope for Coldstar's planned independent audit. Run it against devnet, read the policy file before you trust it with anything, and see the posture note below.
+
+### SPL tokens, and a hole that used to be here (read this)
+
+Until 0.3.0 `allowTokens` was declared in the schema and **never read**. Allowlisting the Token program so an agent could pay in USDC therefore switched off every amount control, because the SOL limits count lamports and a token transfer moves none. A policy reading `"allowTokens": ["SOL"]` looked restrictive and bounded nothing. If you ran an earlier version with the Token program allowlisted, treat that wallet as having had no token limits at all.
+
+Now:
+
+- `allowTokens` is enforced. It holds `"SOL"` and/or mint addresses; a movement of anything else escalates. A policy that omits `"SOL"` no longer moves SOL either.
+- `tokenLimits` sets per-transaction and daily caps **per mint, in base units as strings** (USDC has 6 decimals, so `"25000000"` is 25 USDC). Base units and strings because money and floats do not mix.
+- Destinations are token accounts, not wallets, so the wallet derives the associated token account of every `allowRecipients` × mint pair and checks against those. You rarely need to write `allowTokenAccounts` by hand.
+- The daily per-mint total persists in the ledger and, with `COLDSTAR_CHAIN_LEDGER=1`, is cross-checked against token balance deltas on chain.
+
+**Instructions that cannot be bounded are refused**, which means ESCALATE, so a human sees them: `Approve` and `ApproveChecked` (a delegate can drain later with no further signing — this was the sharpest edge), `SetAuthority`, `MintTo`, `Burn`, `CloseAccount`, and any discriminant the decoder does not know. A bare `Transfer` also escalates: its accounts do not include the mint, so the asset cannot be identified and `allowTokens` cannot be applied. Use `TransferChecked`, which is the recommended instruction anyway.
 
 ### Posture on non-System programs (read this)
 
