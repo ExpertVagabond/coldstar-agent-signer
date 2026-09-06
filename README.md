@@ -28,6 +28,7 @@ raw tx ──(project + parseTx, fail-closed)──▶ TxIntent ──(evaluate)
 | `src/adapter/parseTx.test.ts` | ✅ 17 unit tests incl. the fail-closed cases |
 | `src/wallet/tokens.ts` | ✅ associated-token-account derivation, verified against `@solana/spl-token` |
 | `src/policy/tokens.test.ts` | ✅ 25 tests built with the real SPL library: the USDC hole, Approve, per-mint caps |
+| `src/policy/squads.test.ts` | ✅ 11 tests built with `@sqds/multisig`: spending limits read, privilege escalation refused |
 | `src/wallet/project.ts` | ✅ web3.js `Transaction`/`VersionedTransaction` → `DecompiledMessage`; fail-closed on lookup-table accounts |
 | `src/wallet/coldstarWallet.ts` | ✅ `ColdstarWallet` — drop-in for Solana Agent Kit's `BaseWallet` (structurally typed, no framework dependency) |
 | `src/wallet/coldstarWallet.test.ts` | ✅ 17 tests: the three decisions, daily cap, batch atomicity, fail-closed edges |
@@ -136,6 +137,21 @@ npm install coldstar-agent-signer @solana/web3.js tweetnacl
 Read [`THREAT-MODEL.md`](THREAT-MODEL.md) before trusting this with anything. It states plainly what the design does not protect against: no secure element, a keylogger on the offline machine defeats it entirely, a stolen session key is beyond any local control, and the code is unaudited.
 
 **Status: beta, devnet.** The signing core and policy engine are in scope for Coldstar's planned independent audit. Run it against devnet, read the policy file before you trust it with anything, and see the posture note below.
+
+### Layering with Squads
+
+Coldstar's honest limit is that it cannot stop someone who has stolen the session key: that person signs with web3.js and never touches this code. Squads fixes exactly that, and Coldstar fixes what Squads leaves open, so the two compose better than either alone.
+
+| | Alone | Together |
+|---|---|---|
+| **Squads** | On-chain spending limits the program enforces, but members typically sign from a hot browser wallet (its docs route Ledger through Phantom or Solflare with blind signing). | Members can be cold-rooted session keys under local policy. |
+| **Coldstar** | Cold root, local policy, escalation to a human — all defeated by a stolen session key. | A stolen key is bounded by the on-chain limit, whoever holds it. |
+
+Put the funds in a Squads vault, make the session key a member with a spending limit, and Coldstar decodes `spending_limit_use` so its own per-transaction, daily and per-mint limits apply on top of the chain's. Set `allowPrograms` to include `SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf`.
+
+Crucially, Squads is not one opaque allowlisted program. The instructions that would let an agent raise its own ceiling are separate instructions, so they are named and refused: `multisig_add_spending_limit`, `multisig_remove_spending_limit`, `config_transaction_execute`, `vault_transaction_execute`, `proposal_create` and `proposal_vote` all escalate to a human. An agent can spend inside its limit and cannot change the limit.
+
+Nothing here needs Squads' permission: the v4 program is AGPL and permissionless on mainnet and devnet, and the tests build their instructions with `@sqds/multisig` itself.
 
 ### The air gap is the part people get wrong
 

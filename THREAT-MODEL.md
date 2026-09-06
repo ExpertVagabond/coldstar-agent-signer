@@ -16,7 +16,9 @@ That removes one specific class of loss: the remote attacker. Malware on your ev
 
 **A keylogger on the offline machine.** If the machine that decrypts the key is already compromised, this design fails completely. It will capture your passphrase, and the drive is right there. The air gap defends the online side; it assumes the offline side is clean. That assumption is doing real work, which is why the hardening guide below is not optional advice.
 
-**A stolen session key.** Anyone holding the session secret does not need this package; they can sign with web3.js directly, and no local policy, revocation, or ledger can stop them. Policy bounds the agent, not a thief with the key file. If that is your threat, the funds have to sit behind something that enforces membership on-chain, which on Solana today means Squads spending limits.
+**A stolen session key.** Anyone holding the session secret does not need this package; they can sign with web3.js directly, and no local policy, revocation, or ledger can stop them. Policy bounds the agent, not a thief with the key file.
+
+The answer is to put the funds where the chain enforces the limit. Hold them in a [Squads](https://squads.so) vault, make the session key a member with an on-chain spending limit, and the program refuses to move more than the limit no matter who holds the key. Coldstar reads `spending_limit_use` so its own limits still apply on top, and refuses the instructions that would let an agent raise its ceiling. The two layers cover each other's gap: Coldstar keeps the key from being stolen remotely and stops the agent doing something silly fast and locally, Squads bounds the damage if the key is stolen anyway. See "Layering with Squads" in the README.
 
 **Unaudited code.** This decrypts private keys and has not been audited. You are trusting code review you have done or have not done. It is MIT and small on purpose: `src/policy/evaluate.ts` is a pure function, `src/adapter/parseTx.ts` is a decoder with no I/O, and those two files are where a bug becomes a loss. Read those first.
 

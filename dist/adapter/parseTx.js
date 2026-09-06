@@ -23,6 +23,8 @@ export const TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 export const TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 export const ASSOCIATED_TOKEN_PROGRAM_ID = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 const TOKEN_PROGRAMS = new Set([TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]);
+/** Squads Protocol v4 multisig, mainnet and devnet. */
+export const SQUADS_PROGRAM_ID = "SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf";
 /** System Program instruction discriminants that move lamports out of `from`. */
 const SYS_CREATE_ACCOUNT = 0;
 const SYS_TRANSFER = 2;
@@ -200,6 +202,102 @@ function decodeTokenIx(ix, feePayer) {
         movement: { mint, amount, ...(decimals !== undefined ? { decimals } : {}), destination, source },
     };
 }
+/*
+ * ── SQUADS v4 ───────────────────────────────────────────────────────────────
+ * The pairing this decoder exists for.
+ *
+ * Coldstar bounds what the agent may sign; it cannot bound someone who has
+ * stolen the session key, because that person signs with web3.js and never
+ * touches this code. Squads closes exactly that gap: put the funds in a Squads
+ * vault, make the session key a member with an on-chain spending limit, and the
+ * program itself refuses to move more than the limit no matter who holds the key.
+ *
+ * For that to work, Coldstar must READ `spending_limit_use` rather than treat
+ * the Squads program as opaque, and must refuse the instructions that would let
+ * an agent raise its own ceiling — adding a spending limit, changing the
+ * multisig config, or executing an arbitrary vault transaction. Those are the
+ * privilege escalations, and they are separate instructions, so they can be
+ * named and refused.
+ *
+ * Anchor discriminators are the first 8 bytes of sha256("global:<name>").
+ */
+const SQUADS_SPENDING_LIMIT_USE = [16, 57, 130, 127, 193, 20, 155, 134];
+/** Squads instructions that change what the agent is allowed to do. */
+const SQUADS_PRIVILEGED = [
+    { disc: [11, 242, 159, 42, 86, 197, 89, 115], name: "multisig_add_spending_limit (raises the agent's own ceiling)" },
+    { disc: [228, 198, 136, 111, 123, 4, 178, 113], name: "multisig_remove_spending_limit" },
+    { disc: [114, 146, 244, 189, 252, 140, 36, 40], name: "config_transaction_execute (changes members or threshold)" },
+    { disc: [194, 8, 161, 87, 153, 164, 25, 171], name: "vault_transaction_execute (arbitrary transfer from the vault)" },
+    { disc: [220, 60, 73, 224, 30, 108, 79, 159], name: "proposal_create" },
+    { disc: [154, 156, 238, 88, 131, 15, 198, 112], name: "proposal_vote" },
+];
+function discEquals(data, disc) {
+    if (data.length < 8)
+        return false;
+    return disc.every((b, i) => data[i] === b);
+}
+/**
+ * Decode `spending_limit_use`.
+ *
+ * Args after the 8-byte discriminator: amount u64 LE, decimals u8, memo Option<String>.
+ * Accounts: [multisig, member(signer), spending_limit, vault, destination,
+ *            system_program?, mint?, vault_token_account?, destination_token_account?, token_program?]
+ *
+ * Only a spend the SESSION KEY authorises is ours: the member at index 1 must
+ * be the fee payer. The value leaves the vault rather than our wallet, which is
+ * why this is counted here and not by the System or Token decoders.
+ */
+function decodeSquadsIx(ix, feePayer) {
+    const data = ix.data;
+    if (!data || data.length < 8)
+        return { ok: false, reason: "squads instruction has no discriminator" };
+    const privileged = SQUADS_PRIVILEGED.find((p) => discEquals(data, p.disc));
+    if (privileged) {
+        return { ok: false, reason: `squads ${privileged.name} — an agent must not change its own limits` };
+    }
+    if (!discEquals(data, SQUADS_SPENDING_LIMIT_USE)) {
+        return { ok: false, reason: "unknown squads instruction" };
+    }
+    const amount = readU64(data, 8);
+    if (amount === undefined)
+        return { ok: false, reason: "squads spending_limit_use has no amount field" };
+    const accounts = ix.accounts ?? [];
+    const member = accounts[1]?.address;
+    const destination = accounts[4]?.address;
+    if (member === undefined || destination === undefined) {
+        return { ok: false, reason: "squads spending_limit_use is missing accounts" };
+    }
+    // A spend authorised by another member is not ours to bound.
+    if (member !== feePayer)
+        return { ok: true, value: { programId: ix.programAddress } };
+    // Anchor passes the program id in place of an absent optional account. The
+    // MINT slot decides, and it must be checked FIRST: the SDK fills the
+    // system_program slot even for an SPL spend, so testing that slot first reads
+    // a USDC amount as lamports. A test caught exactly that.
+    const isNone = (a) => a === undefined || a === ix.programAddress;
+    const systemProgram = accounts[5]?.address;
+    const mint = accounts[6]?.address;
+    if (isNone(mint) && systemProgram === SYSTEM_PROGRAM_ID) {
+        // SOL: amount is lamports leaving the vault.
+        return { ok: true, value: { programId: ix.programAddress, recipient: destination, lamports: Number(amount) } };
+    }
+    if (!isNone(mint)) {
+        const decimals = data.length >= 17 ? data[16] : undefined;
+        const destinationTokenAccount = accounts[8]?.address;
+        return {
+            ok: true,
+            value: { programId: ix.programAddress, recipient: destination },
+            movement: {
+                mint: mint,
+                amount,
+                ...(decimals !== undefined ? { decimals } : {}),
+                ...(destinationTokenAccount !== undefined ? { destination: destinationTokenAccount } : {}),
+            },
+        };
+    }
+    // Neither branch identified the asset. Refusing beats guessing zero.
+    return { ok: false, reason: "squads spending_limit_use: could not tell whether this moves SOL or an SPL token" };
+}
 /**
  * ── DECISION SEAM ────────────────────────────────────────────────────────────
  * How to treat an instruction for a program that is NOT the System Program.
@@ -254,7 +352,9 @@ export function parseTx(message) {
             ? decodeSystemIx(ix, message.feePayer)
             : TOKEN_PROGRAMS.has(ix.programAddress)
                 ? decodeTokenIx(ix, message.feePayer)
-                : classifyOpaqueProgram(ix);
+                : ix.programAddress === SQUADS_PROGRAM_ID
+                    ? decodeSquadsIx(ix, message.feePayer)
+                    : classifyOpaqueProgram(ix);
         if (!decoded.ok)
             return { ok: false, reason: decoded.reason };
         instructions.push(decoded.value);
