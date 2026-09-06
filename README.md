@@ -29,6 +29,7 @@ raw tx ──(project + parseTx, fail-closed)──▶ TxIntent ──(evaluate)
 | `src/wallet/tokens.ts` | ✅ associated-token-account derivation, verified against `@solana/spl-token` |
 | `src/policy/tokens.test.ts` | ✅ 25 tests built with the real SPL library: the USDC hole, Approve, per-mint caps |
 | `src/policy/squads.test.ts` | ✅ 11 tests built with `@sqds/multisig`: spending limits read, privilege escalation refused |
+| `src/policy/programs.test.ts` | ✅ 13 tests: priority fees counted as spending, token-account rent, memo |
 | `src/wallet/project.ts` | ✅ web3.js `Transaction`/`VersionedTransaction` → `DecompiledMessage`; fail-closed on lookup-table accounts |
 | `src/wallet/coldstarWallet.ts` | ✅ `ColdstarWallet` — drop-in for Solana Agent Kit's `BaseWallet` (structurally typed, no framework dependency) |
 | `src/wallet/coldstarWallet.test.ts` | ✅ 17 tests: the three decisions, daily cap, batch atomicity, fail-closed edges |
@@ -152,6 +153,22 @@ Put the funds in a Squads vault, make the session key a member with a spending l
 Crucially, Squads is not one opaque allowlisted program. The instructions that would let an agent raise its own ceiling are separate instructions, so they are named and refused: `multisig_add_spending_limit`, `multisig_remove_spending_limit`, `config_transaction_execute`, `vault_transaction_execute`, `proposal_create` and `proposal_vote` all escalate to a human. An agent can spend inside its limit and cannot change the limit.
 
 Nothing here needs Squads' permission: the v4 program is AGPL and permissionless on mainnet and devnet, and the tests build their instructions with `@sqds/multisig` itself.
+
+### What Coldstar can read
+
+An integration, for a policy signer, is a decoder. A program it cannot read is either escalate-everything, which makes the agent useless, or trust-blindly, which makes the limits a decoration. So the list of decoded programs is the list of things an agent can actually do:
+
+| Program | What Coldstar does with it |
+|---|---|
+| **System** | SOL transfers decoded exactly; unknown discriminants escalate |
+| **SPL Token / Token-2022** | `TransferChecked` decoded to amount, mint and destination. `Approve`, `SetAuthority`, `Burn`, `MintTo`, `CloseAccount` and unknown instructions escalate. A bare `Transfer` escalates: it does not name the mint |
+| **Associated Token Account** | Creating a payee's account is the ordinary first payment, so it is decoded rather than escalated. Rent is charged against the limits, because creating accounts in a loop is a slow drain |
+| **Compute Budget** | The priority fee is computed from the unit limit and price and **counted as spending**. It is real SOL and it is not a transfer, so nothing else would have caught it |
+| **Memo** | Read as moving nothing |
+| **Squads v4** | `spending_limit_use` decoded; the instructions that raise the agent's own ceiling refused |
+| **Anything else** | Bounded only by the program allowlist. Turn on `COLDSTAR_SIMULATE=1` to measure the real debit instead of trusting it |
+
+Decoding is not permission. A program still has to be in `allowPrograms`; being decoded only means the limits mean something once it is.
 
 ### The air gap is the part people get wrong
 

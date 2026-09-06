@@ -22,6 +22,9 @@ export const SYSTEM_PROGRAM_ID = "11111111111111111111111111111111";
 export const TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 export const TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 export const ASSOCIATED_TOKEN_PROGRAM_ID = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
+export const COMPUTE_BUDGET_PROGRAM_ID = "ComputeBudget111111111111111111111111111111";
+export const MEMO_PROGRAM_ID = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+export const MEMO_LEGACY_PROGRAM_ID = "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo";
 const TOKEN_PROGRAMS = new Set([TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]);
 /** Squads Protocol v4 multisig, mainnet and devnet. */
 export const SQUADS_PROGRAM_ID = "SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf";
@@ -203,6 +206,93 @@ function decodeTokenIx(ix, feePayer) {
     };
 }
 /*
+ * ── COMPUTE BUDGET ──────────────────────────────────────────────────────────
+ * A priority fee is real SOL leaving the wallet, and it is not a transfer, so
+ * the amount limits never saw it. Allowlisting this program as opaque let an
+ * agent set an absurd fee and drain the wallet inside policy: 1.4M compute
+ * units at 5,000,000 microlamports is about 7 SOL, and it auto-signed. Measured,
+ * not hypothesised.
+ *
+ * The ceiling is computable from the two instructions: units x price. That is
+ * an upper bound, since unused units are refunded, so charging it against the
+ * limits is the conservative direction.
+ */
+const CB_SET_UNIT_LIMIT = 2;
+const CB_SET_UNIT_PRICE = 3;
+/** Solana's per-transaction ceiling when no limit instruction is present. */
+const MAX_COMPUTE_UNITS = 1_400_000;
+const DEFAULT_UNITS_PER_IX = 200_000;
+function readU32(data, offset) {
+    if (data.length < offset + 4)
+        return undefined;
+    return new DataView(data.buffer, data.byteOffset + offset, 4).getUint32(0, true);
+}
+function decodeComputeBudgetIx(ix, cb) {
+    const data = ix.data;
+    if (!data || data.length < 1)
+        return { ok: false, reason: "compute budget instruction has no data" };
+    const disc = data[0];
+    if (disc === CB_SET_UNIT_LIMIT) {
+        const units = readU32(data, 1);
+        if (units === undefined)
+            return { ok: false, reason: "SetComputeUnitLimit has no units field" };
+        cb.units = units;
+    }
+    else if (disc === CB_SET_UNIT_PRICE) {
+        const price = readU64(data, 1);
+        if (price === undefined)
+            return { ok: false, reason: "SetComputeUnitPrice has no price field" };
+        cb.microLamports = price;
+    }
+    else if (disc > 4) {
+        return { ok: false, reason: `unknown compute budget instruction ${disc}` };
+    }
+    // RequestHeapFrame and SetLoadedAccountsDataSizeLimit move no value.
+    return { ok: true, value: { programId: ix.programAddress } };
+}
+/** Upper bound on the priority fee, in lamports. */
+function priorityFeeLamports(cb, instructionCount) {
+    if (cb.microLamports === undefined || cb.microLamports === 0n)
+        return 0n;
+    const units = BigInt(cb.units ?? Math.min(DEFAULT_UNITS_PER_IX * instructionCount, MAX_COMPUTE_UNITS));
+    // ceil(units * microLamports / 1e6)
+    const numerator = units * cb.microLamports;
+    return (numerator + 999999n) / 1000000n;
+}
+/*
+ * ── ASSOCIATED TOKEN ACCOUNT ────────────────────────────────────────────────
+ * Paying someone who has no token account yet means creating one, so treating
+ * this program as opaque made the ordinary case escalate. It is not free: the
+ * payer funds rent exemption, so an agent could drain a wallet by creating
+ * accounts in a loop. Rent is charged against the limits at a deliberately
+ * rounded-up constant, because the exact figure depends on account size and
+ * over-counting is the safe direction for a cap.
+ */
+const ATA_RENT_LAMPORTS = 2_500_000; // > 2,039,280 for a standard token account
+const ATA_CREATE = 0;
+const ATA_CREATE_IDEMPOTENT = 1;
+const ATA_RECOVER_NESTED = 2;
+function decodeAtaIx(ix, feePayer) {
+    // Legacy Create carries no data at all.
+    const disc = !ix.data || ix.data.length === 0 ? ATA_CREATE : ix.data[0];
+    if (disc !== ATA_CREATE && disc !== ATA_CREATE_IDEMPOTENT && disc !== ATA_RECOVER_NESTED) {
+        return { ok: false, reason: `unknown associated token account instruction ${disc}` };
+    }
+    if (disc === ATA_RECOVER_NESTED) {
+        // Moves a nested account's balance to the wallet owner. It credits rather
+        // than debits, but the account layout differs; refuse rather than model it.
+        return { ok: false, reason: "associated token account RecoverNested is not modelled" };
+    }
+    const payer = ix.accounts?.[0]?.address;
+    if (payer === undefined)
+        return { ok: false, reason: "associated token account create is missing the payer" };
+    if (payer !== feePayer)
+        return { ok: true, value: { programId: ix.programAddress } };
+    // We fund the rent. Count it, without a recipient: rent is not a payment to
+    // anyone, so it must not be checked against the recipient allowlist.
+    return { ok: true, value: { programId: ix.programAddress, lamports: ATA_RENT_LAMPORTS } };
+}
+/*
  * ── SQUADS v4 ───────────────────────────────────────────────────────────────
  * The pairing this decoder exists for.
  *
@@ -346,6 +436,7 @@ export function parseTx(message) {
     }
     const instructions = [];
     const tokenMovements = [];
+    const computeBudget = {};
     let outLamports = 0n;
     for (const ix of message.instructions) {
         const decoded = ix.programAddress === SYSTEM_PROGRAM_ID
@@ -354,7 +445,13 @@ export function parseTx(message) {
                 ? decodeTokenIx(ix, message.feePayer)
                 : ix.programAddress === SQUADS_PROGRAM_ID
                     ? decodeSquadsIx(ix, message.feePayer)
-                    : classifyOpaqueProgram(ix);
+                    : ix.programAddress === COMPUTE_BUDGET_PROGRAM_ID
+                        ? decodeComputeBudgetIx(ix, computeBudget)
+                        : ix.programAddress === ASSOCIATED_TOKEN_PROGRAM_ID
+                            ? decodeAtaIx(ix, message.feePayer)
+                            : ix.programAddress === MEMO_PROGRAM_ID || ix.programAddress === MEMO_LEGACY_PROGRAM_ID
+                                ? { ok: true, value: { programId: ix.programAddress } }
+                                : classifyOpaqueProgram(ix);
         if (!decoded.ok)
             return { ok: false, reason: decoded.reason };
         instructions.push(decoded.value);
@@ -364,6 +461,9 @@ export function parseTx(message) {
         if (decoded.movement)
             tokenMovements.push(decoded.movement);
     }
+    // The priority fee depends on two instructions together, so it is added once
+    // the whole message has been read.
+    outLamports += priorityFeeLamports(computeBudget, message.instructions.length);
     // Distinct destinations, in first-seen order, for the allowlist/blocklist checks.
     const recipients = [
         ...new Set(instructions

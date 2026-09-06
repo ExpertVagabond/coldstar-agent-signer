@@ -1,6 +1,6 @@
 {
   "name": "coldstar-agent-signer",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Agent-safe signing for Coldstar — policy-gated auto-sign / air-gapped escalation / reject. The agent never holds the root key.",
   "author": "Matthew Karsten <matthewkarstenconnects@gmail.com>",
   "license": "MIT",
