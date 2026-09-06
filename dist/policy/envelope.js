@@ -73,11 +73,12 @@ export function parsePolicy(raw) {
     return r.data;
 }
 const EnvelopeSchema = z.object({
-    version: z.literal(1),
+    version: z.union([z.literal(1), z.literal(2)]),
     policy: PolicySchema,
     sessionPubkey: z.string().min(32).max(44),
     issuedAt: z.string().datetime(),
     expiresAt: z.string().datetime().nullable(),
+    revoker: z.string().min(32).max(44).nullable().optional(),
     rootPubkey: z.string().min(32).max(44),
     signature: z.string().min(80).max(96),
 }).strict();
@@ -91,7 +92,11 @@ function canonical(v) {
     return JSON.stringify(v);
 }
 export function envelopePayload(e) {
-    return new TextEncoder().encode(canonical({ policy: e.policy, sessionPubkey: e.sessionPubkey, issuedAt: e.issuedAt, expiresAt: e.expiresAt }));
+    const base = { policy: e.policy, sessionPubkey: e.sessionPubkey, issuedAt: e.issuedAt, expiresAt: e.expiresAt };
+    // Version 1 envelopes were signed over these four fields only; adding a field
+    // to their payload would invalidate every grant already issued.
+    const payload = (e.version ?? 1) === 2 ? { ...base, revoker: e.revoker ?? null } : base;
+    return new TextEncoder().encode(canonical(payload));
 }
 /**
  * Sign a policy for one session key. Meant to run on the AIR-GAPPED machine
@@ -102,14 +107,17 @@ export function signPolicyEnvelope(args) {
     const issuedAt = (args.issuedAt ?? new Date()).toISOString();
     const expiresAt = args.expiresAt === undefined ? null : args.expiresAt === null ? null : args.expiresAt.toISOString();
     const kp = nacl.sign.keyPair.fromSecretKey(args.rootSecretKey);
-    const payload = envelopePayload({ policy, sessionPubkey: args.sessionPubkey, issuedAt, expiresAt });
+    const version = args.revoker === undefined ? 1 : 2;
+    const revoker = args.revoker ?? null;
+    const payload = envelopePayload({ version, policy, sessionPubkey: args.sessionPubkey, issuedAt, expiresAt, revoker });
     const sig = nacl.sign.detached(payload, kp.secretKey);
     return {
-        version: 1,
+        version,
         policy,
         sessionPubkey: args.sessionPubkey,
         issuedAt,
         expiresAt,
+        ...(version === 2 ? { revoker } : {}),
         rootPubkey: bs58.encode(kp.publicKey),
         signature: bs58.encode(sig),
     };
@@ -151,6 +159,9 @@ export function verifyPolicyEnvelope(raw, opts) {
     }
     if (root.length !== 32 || sig.length !== 64) {
         return { ok: false, reason: "envelope key or signature has the wrong length" };
+    }
+    if (e.version === 1 && e.revoker != null) {
+        return { ok: false, reason: "version 1 envelope carries a revoker, which its signature does not cover; re-sign as version 2" };
     }
     if (!nacl.sign.detached.verify(envelopePayload(e), sig, root)) {
         return { ok: false, reason: "envelope signature does not verify: the policy was altered or signed by a different key" };

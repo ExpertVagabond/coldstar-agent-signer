@@ -2,6 +2,7 @@ import { type Keypair, type PublicKey, type SendOptions, type Transaction, type 
 import type { Decision, EvalState, Policy, TxIntent } from "../policy/schema.js";
 import type { Simulator } from "./simulate.js";
 import { type PolicyEnvelope } from "../policy/envelope.js";
+import { RevocationChecker } from "../policy/revocation.js";
 export type SolanaTx = Transaction | VersionedTransaction;
 /** Structural copy of Solana Agent Kit's BaseWallet — no import needed. */
 export interface BaseWalletLike {
@@ -94,6 +95,13 @@ export interface ColdstarWalletOptions {
         simulate: Simulator;
         when?: "opaque" | "always";
     };
+    /**
+     * On-chain revocation. When set, every decision first asks the chain whether
+     * this grant is still live. Revoked is a hard REJECT; a chain the signer
+     * cannot reach is an ESCALATE, so cutting the signer off from RPC stops the
+     * agent rather than freeing it.
+     */
+    revocation?: RevocationChecker;
 }
 /** What the wallet decided for one transaction, before any signing happens. */
 export interface Verdict {
@@ -114,6 +122,7 @@ export declare class ColdstarWallet implements BaseWalletLike {
     private readonly allowMessageSigning;
     private readonly onDecision;
     private readonly preflight;
+    private readonly revocation;
     /**
      * Build a wallet from a ROOT-SIGNED policy envelope. Verifies the root's
      * signature, that the envelope names this session key, and expiry, and
@@ -124,6 +133,8 @@ export declare class ColdstarWallet implements BaseWalletLike {
         envelope: unknown;
         expectedRoot?: string;
         now?: Date;
+        /** true: check revocation on chain, using the root and the envelope's revoker as authorities. */
+        checkRevocation?: boolean;
     }): ColdstarWallet;
     constructor(opts: ColdstarWalletOptions, envelope?: PolicyEnvelope);
     /**

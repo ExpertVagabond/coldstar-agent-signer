@@ -25,6 +25,7 @@ import { parseTx } from "../adapter/parseTx.js";
 import { isVersionedTransaction, projectTransaction } from "./project.js";
 import { SYSTEM_PROGRAM_ID } from "../adapter/parseTx.js";
 import { verifyPolicyEnvelope } from "../policy/envelope.js";
+import { RevocationChecker } from "../policy/revocation.js";
 export class InMemorySpendLedger {
     now;
     day = utcDay();
@@ -89,6 +90,7 @@ export class ColdstarWallet {
     allowMessageSigning;
     onDecision;
     preflight;
+    revocation;
     /**
      * Build a wallet from a ROOT-SIGNED policy envelope. Verifies the root's
      * signature, that the envelope names this session key, and expiry, and
@@ -103,8 +105,17 @@ export class ColdstarWallet {
         });
         if (!check.ok)
             throw new Error(`Coldstar: refusing to start — ${check.reason}`);
-        const { envelope: _e, expectedRoot: _r, now: _n, ...rest } = opts;
-        return new ColdstarWallet({ ...rest, policy: check.envelope.policy }, check.envelope);
+        const { envelope: _e, expectedRoot: _r, now: _n, checkRevocation, ...rest } = opts;
+        const env = check.envelope;
+        const revocation = rest.revocation ??
+            (checkRevocation
+                ? new RevocationChecker({
+                    connection: rest.rpcUrl,
+                    sessionPubkey: env.sessionPubkey,
+                    authorities: [env.rootPubkey, ...(env.revoker ? [env.revoker] : [])],
+                })
+                : undefined);
+        return new ColdstarWallet({ ...rest, policy: env.policy, ...(revocation ? { revocation } : {}) }, env);
     }
     constructor(opts, envelope) {
         this.envelope = envelope;
@@ -117,6 +128,7 @@ export class ColdstarWallet {
         this.allowMessageSigning = opts.allowMessageSigning ?? false;
         this.onDecision = opts.onDecision;
         this.preflight = opts.preflight;
+        this.revocation = opts.revocation;
     }
     /**
      * Evaluate without signing. Pure with respect to the ledger (reads only).
@@ -146,6 +158,16 @@ export class ColdstarWallet {
      * records on AUTO_SIGN.
      */
     async evaluateTx(tx, extraSpendSol = 0) {
+        // Revocation first: a cancelled grant signs nothing, whatever the policy says.
+        if (this.revocation) {
+            const r = await this.revocation.status();
+            if (r.state === "revoked") {
+                return { decision: "REJECT", reason: `grant revoked on chain by ${r.by} (${r.signature.slice(0, 8)}…)`, intent: undefined };
+            }
+            if (r.state === "unknown") {
+                return { decision: "ESCALATE", reason: `cannot confirm the grant is still live: ${r.reason}`, intent: undefined };
+            }
+        }
         // A ledger backed by an external source (the chain) refreshes here, before
         // any verdict reads it.
         await this.ledger.sync?.();

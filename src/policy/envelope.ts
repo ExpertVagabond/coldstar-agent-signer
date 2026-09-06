@@ -75,7 +75,8 @@ export function parsePolicy(raw: unknown): Policy {
 }
 
 export interface PolicyEnvelope {
-  version: 1;
+  /** 1: no revoker. 2: adds `revoker`, which is covered by the signature. */
+  version: 1 | 2;
   /** The policy the session key is bound by. */
   policy: Policy;
   /** The one session key this grant authorises (base58). */
@@ -84,6 +85,12 @@ export interface PolicyEnvelope {
   issuedAt: string;
   /** ISO-8601, or null for no expiry. Short grants are the point; prefer hours or days. */
   expiresAt: string | null;
+  /**
+   * A hot key permitted to publish an on-chain revocation for this grant, but
+   * with no spending power. Lets an operator kill a grant without opening the
+   * safe. Version 2 only; covered by the signature.
+   */
+  revoker?: string | null;
   /** The cold root that signed this (base58 Ed25519 public key). */
   rootPubkey: string;
   /** Ed25519 signature over canonical({policy, sessionPubkey, issuedAt, expiresAt}), base58. */
@@ -91,11 +98,12 @@ export interface PolicyEnvelope {
 }
 
 const EnvelopeSchema = z.object({
-  version: z.literal(1),
+  version: z.union([z.literal(1), z.literal(2)]),
   policy: PolicySchema,
   sessionPubkey: z.string().min(32).max(44),
   issuedAt: z.string().datetime(),
   expiresAt: z.string().datetime().nullable(),
+  revoker: z.string().min(32).max(44).nullable().optional(),
   rootPubkey: z.string().min(32).max(44),
   signature: z.string().min(80).max(96),
 }).strict();
@@ -109,10 +117,14 @@ function canonical(v: unknown): string {
   return JSON.stringify(v);
 }
 
-export function envelopePayload(e: Pick<PolicyEnvelope, "policy" | "sessionPubkey" | "issuedAt" | "expiresAt">): Uint8Array {
-  return new TextEncoder().encode(
-    canonical({ policy: e.policy, sessionPubkey: e.sessionPubkey, issuedAt: e.issuedAt, expiresAt: e.expiresAt }),
-  );
+export function envelopePayload(
+  e: Pick<PolicyEnvelope, "policy" | "sessionPubkey" | "issuedAt" | "expiresAt"> & { version?: 1 | 2; revoker?: string | null },
+): Uint8Array {
+  const base = { policy: e.policy, sessionPubkey: e.sessionPubkey, issuedAt: e.issuedAt, expiresAt: e.expiresAt };
+  // Version 1 envelopes were signed over these four fields only; adding a field
+  // to their payload would invalidate every grant already issued.
+  const payload = (e.version ?? 1) === 2 ? { ...base, revoker: e.revoker ?? null } : base;
+  return new TextEncoder().encode(canonical(payload));
 }
 
 /**
@@ -125,19 +137,24 @@ export function signPolicyEnvelope(args: {
   sessionPubkey: string;
   issuedAt?: Date;
   expiresAt?: Date | null;
+  /** Hot key allowed to revoke this grant on chain. Emits a version 2 envelope. */
+  revoker?: string | null;
 }): PolicyEnvelope {
   const policy = parsePolicy(args.policy);
   const issuedAt = (args.issuedAt ?? new Date()).toISOString();
   const expiresAt = args.expiresAt === undefined ? null : args.expiresAt === null ? null : args.expiresAt.toISOString();
   const kp = nacl.sign.keyPair.fromSecretKey(args.rootSecretKey);
-  const payload = envelopePayload({ policy, sessionPubkey: args.sessionPubkey, issuedAt, expiresAt });
+  const version: 1 | 2 = args.revoker === undefined ? 1 : 2;
+  const revoker = args.revoker ?? null;
+  const payload = envelopePayload({ version, policy, sessionPubkey: args.sessionPubkey, issuedAt, expiresAt, revoker });
   const sig = nacl.sign.detached(payload, kp.secretKey);
   return {
-    version: 1,
+    version,
     policy,
     sessionPubkey: args.sessionPubkey,
     issuedAt,
     expiresAt,
+    ...(version === 2 ? { revoker } : {}),
     rootPubkey: bs58.encode(kp.publicKey),
     signature: bs58.encode(sig),
   };
@@ -186,6 +203,9 @@ export function verifyPolicyEnvelope(
   }
   if (root.length !== 32 || sig.length !== 64) {
     return { ok: false, reason: "envelope key or signature has the wrong length" };
+  }
+  if (e.version === 1 && e.revoker != null) {
+    return { ok: false, reason: "version 1 envelope carries a revoker, which its signature does not cover; re-sign as version 2" };
   }
   if (!nacl.sign.detached.verify(envelopePayload(e), sig, root)) {
     return { ok: false, reason: "envelope signature does not verify: the policy was altered or signed by a different key" };

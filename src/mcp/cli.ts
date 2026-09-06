@@ -28,6 +28,8 @@
 //   COLDSTAR_LEDGER               path of the persistent daily-spend ledger (default ./.coldstar-ledger.json)
 //   COLDSTAR_CHAIN_LEDGER         "1" to also derive the day's spend from on-chain history, so
 //                                 deleting the local ledger cannot reset the daily cap
+//   COLDSTAR_CHECK_REVOCATION     "1" to ask the chain, before every decision, whether this grant
+//                                 was revoked (envelope mode only). Revoked = REJECT; unreachable = ESCALATE.
 //   COLDSTAR_SIMULATE             "1" to simulate txs through allowlisted non-System programs and
 //                                 apply the measured debit to the limits; "always" to simulate every tx
 //
@@ -112,7 +114,12 @@ const walletOpts = {
 let wallet: ColdstarWallet;
 try {
   wallet = envelopeMode
-    ? ColdstarWallet.fromEnvelope({ ...walletOpts, envelope: policyRaw, ...(expectedRoot ? { expectedRoot } : {}) })
+    ? ColdstarWallet.fromEnvelope({
+        ...walletOpts,
+        envelope: policyRaw,
+        ...(expectedRoot ? { expectedRoot } : {}),
+        checkRevocation: process.env.COLDSTAR_CHECK_REVOCATION === "1",
+      })
     : new ColdstarWallet({ ...walletOpts, policy });
 } catch (e) {
   fail((e as Error).message);
@@ -123,4 +130,4 @@ if (envelopeMode && !expectedRoot) {
 
 const server = createColdstarMcpServer({ wallet, policy, rpcUrl });
 await server.connect(new StdioServerTransport());
-process.stderr.write(`[coldstar] MCP signer up. session=${session.publicKey.toBase58()} rpc=${rpcUrl}` + (wallet.envelope ? ` policy signed by root ${wallet.envelope.rootPubkey}` + (wallet.envelope.expiresAt ? ` until ${wallet.envelope.expiresAt}` : "") : " policy UNSIGNED (devnet only)") + (chainLedger ? " chain-backed ledger" : "") + `\n`);
+process.stderr.write(`[coldstar] MCP signer up. session=${session.publicKey.toBase58()} rpc=${rpcUrl}` + (wallet.envelope ? ` policy signed by root ${wallet.envelope.rootPubkey}` + (wallet.envelope.expiresAt ? ` until ${wallet.envelope.expiresAt}` : "") : " policy UNSIGNED (devnet only)") + (chainLedger ? " chain-backed ledger" : "") + (process.env.COLDSTAR_CHECK_REVOCATION === "1" ? " revocation-checked" : "") + `\n`);

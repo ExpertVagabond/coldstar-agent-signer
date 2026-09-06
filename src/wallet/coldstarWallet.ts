@@ -36,6 +36,7 @@ import { isVersionedTransaction, projectTransaction } from "./project.js";
 import { SYSTEM_PROGRAM_ID } from "../adapter/parseTx.js";
 import type { Simulator } from "./simulate.js";
 import { verifyPolicyEnvelope, type PolicyEnvelope } from "../policy/envelope.js";
+import { RevocationChecker } from "../policy/revocation.js";
 
 export type SolanaTx = Transaction | VersionedTransaction;
 
@@ -155,6 +156,13 @@ export interface ColdstarWalletOptions {
    *         present; "always" simulates every transaction.
    */
   preflight?: { simulate: Simulator; when?: "opaque" | "always" };
+  /**
+   * On-chain revocation. When set, every decision first asks the chain whether
+   * this grant is still live. Revoked is a hard REJECT; a chain the signer
+   * cannot reach is an ESCALATE, so cutting the signer off from RPC stops the
+   * agent rather than freeing it.
+   */
+  revocation?: RevocationChecker;
 }
 
 /** What the wallet decided for one transaction, before any signing happens. */
@@ -177,6 +185,7 @@ export class ColdstarWallet implements BaseWalletLike {
   private readonly allowMessageSigning: boolean;
   private readonly onDecision: ColdstarWalletOptions["onDecision"];
   private readonly preflight: ColdstarWalletOptions["preflight"];
+  private readonly revocation: RevocationChecker | undefined;
 
   /**
    * Build a wallet from a ROOT-SIGNED policy envelope. Verifies the root's
@@ -184,15 +193,33 @@ export class ColdstarWallet implements BaseWalletLike {
    * throws otherwise: an edited policy or an unauthorised session key never
    * gets a running signer. Pin `expectedRoot` in anything beyond a demo.
    */
-  static fromEnvelope(opts: Omit<ColdstarWalletOptions, "policy"> & { envelope: unknown; expectedRoot?: string; now?: Date }): ColdstarWallet {
+  static fromEnvelope(
+    opts: Omit<ColdstarWalletOptions, "policy"> & {
+      envelope: unknown;
+      expectedRoot?: string;
+      now?: Date;
+      /** true: check revocation on chain, using the root and the envelope's revoker as authorities. */
+      checkRevocation?: boolean;
+    },
+  ): ColdstarWallet {
     const check = verifyPolicyEnvelope(opts.envelope, {
       sessionPubkey: opts.session.publicKey.toBase58(),
       ...(opts.expectedRoot ? { expectedRoot: opts.expectedRoot } : {}),
       ...(opts.now ? { now: opts.now } : {}),
     });
     if (!check.ok) throw new Error(`Coldstar: refusing to start — ${check.reason}`);
-    const { envelope: _e, expectedRoot: _r, now: _n, ...rest } = opts;
-    return new ColdstarWallet({ ...rest, policy: check.envelope.policy }, check.envelope);
+    const { envelope: _e, expectedRoot: _r, now: _n, checkRevocation, ...rest } = opts;
+    const env = check.envelope;
+    const revocation =
+      rest.revocation ??
+      (checkRevocation
+        ? new RevocationChecker({
+            connection: rest.rpcUrl,
+            sessionPubkey: env.sessionPubkey,
+            authorities: [env.rootPubkey, ...(env.revoker ? [env.revoker] : [])],
+          })
+        : undefined);
+    return new ColdstarWallet({ ...rest, policy: env.policy, ...(revocation ? { revocation } : {}) }, env);
   }
 
   constructor(opts: ColdstarWalletOptions, envelope?: PolicyEnvelope) {
@@ -206,6 +233,7 @@ export class ColdstarWallet implements BaseWalletLike {
     this.allowMessageSigning = opts.allowMessageSigning ?? false;
     this.onDecision = opts.onDecision;
     this.preflight = opts.preflight;
+    this.revocation = opts.revocation;
   }
 
   /**
@@ -236,6 +264,16 @@ export class ColdstarWallet implements BaseWalletLike {
    * records on AUTO_SIGN.
    */
   async evaluateTx(tx: SolanaTx, extraSpendSol = 0): Promise<Verdict> {
+    // Revocation first: a cancelled grant signs nothing, whatever the policy says.
+    if (this.revocation) {
+      const r = await this.revocation.status();
+      if (r.state === "revoked") {
+        return { decision: "REJECT", reason: `grant revoked on chain by ${r.by} (${r.signature.slice(0, 8)}…)`, intent: undefined };
+      }
+      if (r.state === "unknown") {
+        return { decision: "ESCALATE", reason: `cannot confirm the grant is still live: ${r.reason}`, intent: undefined };
+      }
+    }
     // A ledger backed by an external source (the chain) refreshes here, before
     // any verdict reads it.
     await this.ledger.sync?.();

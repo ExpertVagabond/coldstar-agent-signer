@@ -41,6 +41,9 @@ raw tx ──(project + parseTx, fail-closed)──▶ TxIntent ──(evaluate)
 | `src/wallet/chainLedger.test.ts` | ✅ 7 tests incl. the delete-the-file attack |
 | `src/policy/envelope.ts` | ✅ the root-signed policy envelope: `signPolicyEnvelope`, `verifyPolicyEnvelope`, `parsePolicy` (strict schema) |
 | `src/cli/signPolicy.ts` | ✅ `coldstar-sign-policy` — run on the cold machine; emits the envelope |
+| `src/policy/revocation.ts` | ✅ on-chain revocation: signed memo marker, `RevocationChecker`, fail-closed |
+| `src/cli/revoke.ts` | ✅ `coldstar-revoke` — cancel a grant early |
+| `src/policy/revocation.test.ts` | ✅ 13 tests incl. forged-marker and unreachable-chain cases |
 | `src/policy/envelope.test.ts` | ✅ 11 tests: tamper, wrong root, wrong session, expiry, canonical ordering, wallet refuses bad envelopes |
 
 ## The root signs the policy, not the transaction
@@ -55,7 +58,20 @@ coldstar-sign-policy --root /media/cold/root.json --policy coldstar.policy.json 
 COLDSTAR_POLICY=envelope.json COLDSTAR_ROOT_PUBKEY=<root pubkey> COLDSTAR_REQUIRE_ENVELOPE=1 coldstar-signer-mcp
 ```
 
-In code: `ColdstarWallet.fromEnvelope({ envelope, expectedRoot, session, rpcUrl })`. A bare, unsigned `coldstar.policy.json` still works for tests and devnet; set `COLDSTAR_REQUIRE_ENVELOPE=1` anywhere it matters.
+### Revoking a grant early
+
+An envelope expires on its own, but a grant you want dead *now* needs revocation, and the check has to live where an attacker cannot quietly delete it. It lives on Solana: an authority publishes a signed memo naming the session key, and the signer reads the chain before every decision.
+
+```bash
+coldstar-sign-policy … --revoker <hot pubkey>   # version 2 envelope, revocable without the safe
+coldstar-revoke --authority revoker.json --session <session pubkey>   # emergency stop
+```
+
+Turn the check on with `checkRevocation: true` (or `COLDSTAR_CHECK_REVOCATION=1`). Revoked is a hard **REJECT**; a chain the signer cannot reach is an **ESCALATE**, so cutting the signer off from RPC stops the agent rather than freeing it. Running signers notice within their freshness window, 60 seconds by default.
+
+**Be clear about what this stops.** It stops a compromised *agent*, which is the case this package exists for: a prompt-injected agent proposes transactions through the signer, and a revoked grant refuses all of them. It does **not** stop someone who has stolen the session *secret key*. They do not need this package at all; they can sign with web3.js directly, and no off-chain control can stop them. The answer to a stolen key is to keep funds behind an on-chain program that enforces membership itself, which on Solana today means [Squads](https://squads.so) spending limits. We would rather say that plainly than let it be assumed.
+
+In code: `ColdstarWallet.fromEnvelope({ envelope, expectedRoot, session, rpcUrl, checkRevocation: true })`. A bare, unsigned `coldstar.policy.json` still works for tests and devnet; set `COLDSTAR_REQUIRE_ENVELOPE=1` anywhere it matters.
 
 ## Use it from any MCP client (Claude, Cursor, …)
 

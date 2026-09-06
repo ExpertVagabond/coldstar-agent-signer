@@ -5,6 +5,7 @@
 //
 //   coldstar-sign-policy --root /path/to/root.json --policy coldstar.policy.json \
 //                        --session <session pubkey base58> [--expires 24h|7d|2026-12-31T00:00:00Z]
+//                        [--revoker <pubkey>]   a hot key that may revoke this grant on chain
 //
 // Nothing here touches a network. The root secret never leaves this process.
 import { readFileSync } from "node:fs";
@@ -22,6 +23,7 @@ const rootPath = arg("root") ?? fail("--root <keyfile> is required (the ROOT key
 const policyPath = arg("policy") ?? "coldstar.policy.json";
 const sessionPubkey = arg("session") ?? fail("--session <base58 pubkey> is required");
 const expiresArg = arg("expires");
+const revoker = arg("revoker"); // hot key allowed to revoke this grant on chain
 let expiresAt = null;
 if (expiresArg) {
     const m = /^(\d+)([hd])$/.exec(expiresArg);
@@ -41,8 +43,9 @@ for (const k of ["allowRecipients", "blockRecipients"]) {
     if (policy[k].some((v) => v.startsWith("<") || v.startsWith("$")))
         fail(`policy.${k} still has a placeholder`);
 }
-const envelope = signPolicyEnvelope({ rootSecretKey: root.secretKey, policy, sessionPubkey, expiresAt });
+const envelope = signPolicyEnvelope({ rootSecretKey: root.secretKey, policy, sessionPubkey, expiresAt, ...(revoker ? { revoker } : {}) });
 process.stdout.write(JSON.stringify(envelope, null, 2) + "\n");
 process.stderr.write(`signed by root ${envelope.rootPubkey} for session ${sessionPubkey}` +
-    (expiresAt ? `, expires ${envelope.expiresAt}` : ", no expiry (consider --expires)") + "\n");
+    (expiresAt ? `, expires ${envelope.expiresAt}` : ", no expiry (consider --expires)") +
+    (revoker ? `, revocable by ${revoker}` : "") + "\n");
 //# sourceMappingURL=signPolicy.js.map

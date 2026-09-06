@@ -43,7 +43,8 @@ export declare const PolicySchema: z.ZodObject<{
 /** Parse and validate a bare policy. Throws with the first problem; never returns a partial policy. */
 export declare function parsePolicy(raw: unknown): Policy;
 export interface PolicyEnvelope {
-    version: 1;
+    /** 1: no revoker. 2: adds `revoker`, which is covered by the signature. */
+    version: 1 | 2;
     /** The policy the session key is bound by. */
     policy: Policy;
     /** The one session key this grant authorises (base58). */
@@ -52,12 +53,21 @@ export interface PolicyEnvelope {
     issuedAt: string;
     /** ISO-8601, or null for no expiry. Short grants are the point; prefer hours or days. */
     expiresAt: string | null;
+    /**
+     * A hot key permitted to publish an on-chain revocation for this grant, but
+     * with no spending power. Lets an operator kill a grant without opening the
+     * safe. Version 2 only; covered by the signature.
+     */
+    revoker?: string | null;
     /** The cold root that signed this (base58 Ed25519 public key). */
     rootPubkey: string;
     /** Ed25519 signature over canonical({policy, sessionPubkey, issuedAt, expiresAt}), base58. */
     signature: string;
 }
-export declare function envelopePayload(e: Pick<PolicyEnvelope, "policy" | "sessionPubkey" | "issuedAt" | "expiresAt">): Uint8Array;
+export declare function envelopePayload(e: Pick<PolicyEnvelope, "policy" | "sessionPubkey" | "issuedAt" | "expiresAt"> & {
+    version?: 1 | 2;
+    revoker?: string | null;
+}): Uint8Array;
 /**
  * Sign a policy for one session key. Meant to run on the AIR-GAPPED machine
  * holding the root secret key; the output is plain JSON that crosses the gap.
@@ -68,6 +78,8 @@ export declare function signPolicyEnvelope(args: {
     sessionPubkey: string;
     issuedAt?: Date;
     expiresAt?: Date | null;
+    /** Hot key allowed to revoke this grant on chain. Emits a version 2 envelope. */
+    revoker?: string | null;
 }): PolicyEnvelope;
 export type EnvelopeCheck = {
     ok: true;

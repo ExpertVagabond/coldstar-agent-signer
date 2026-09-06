@@ -1,6 +1,6 @@
 {
   "name": "coldstar-agent-signer",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Agent-safe signing for Coldstar — policy-gated auto-sign / air-gapped escalation / reject. The agent never holds the root key.",
   "author": "Matthew Karsten <matthewkarstenconnects@gmail.com>",
   "license": "MIT",
@@ -29,7 +29,8 @@
   "types": "./dist/index.d.ts",
   "bin": {
     "coldstar-signer-mcp": "dist/mcp/cli.js",
-    "coldstar-sign-policy": "dist/cli/signPolicy.js"
+    "coldstar-sign-policy": "dist/cli/signPolicy.js",
+    "coldstar-revoke": "dist/cli/revoke.js"
   },
   "exports": {
     ".": {
