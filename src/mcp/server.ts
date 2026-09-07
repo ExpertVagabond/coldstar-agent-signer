@@ -22,6 +22,7 @@ import {
   VersionedTransaction,
 } from "@solana/web3.js";
 import { z } from "zod";
+import { createRequire } from "node:module";
 import { ColdstarEscalation, ColdstarRejected, ColdstarWallet } from "../wallet/coldstarWallet.js";
 import type { Policy } from "../policy/schema.js";
 
@@ -82,9 +83,26 @@ function text(o: object) {
   return { content: [{ type: "text" as const, text: JSON.stringify(o, null, 2) }], structuredContent: o as Record<string, unknown> };
 }
 
+/**
+ * The version an MCP client sees. Read from our own package.json rather than
+ * written here: this drifted once already — the server advertised 0.1.0 while
+ * the package was 0.4.1, which a client and the registry both surface. There is
+ * a test asserting these agree, so it cannot drift again silently.
+ */
+export function packageVersion(): string {
+  try {
+    const require = createRequire(import.meta.url);
+    // dist/mcp/server.js -> the package root. package.json is always in the
+    // tarball, so this resolves identically from a repo and from node_modules.
+    return require("../../package.json").version ?? "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+}
+
 export function createColdstarMcpServer(opts: McpServerOptions): McpServer {
   const { wallet, policy, rpcUrl } = opts;
-  const server = new McpServer({ name: opts.name ?? "coldstar-signer", version: opts.version ?? "0.1.0" });
+  const server = new McpServer({ name: opts.name ?? "coldstar-signer", version: opts.version ?? packageVersion() });
   const cluster = /devnet/.test(rpcUrl) ? "?cluster=devnet" : /testnet/.test(rpcUrl) ? "?cluster=testnet" : "";
 
   async function signOrExplain(tx: VersionedTransaction): Promise<OutcomeT> {

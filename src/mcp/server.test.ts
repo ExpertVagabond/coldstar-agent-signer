@@ -135,3 +135,17 @@ describe("Coldstar MCP server", () => {
     expect(out.signature).toBeUndefined();
   });
 });
+
+// The MCP server advertises a version to every client and to the registry. It
+// once said 0.1.0 while the package was 0.4.1 — caught by installing the
+// published tarball and driving it over stdio, not by any test. This is that
+// test.
+describe("the advertised version", () => {
+  it("matches the package version", async () => {
+    const { packageVersion } = await import("./server.js");
+    const { createRequire } = await import("node:module");
+    const pkg = createRequire(import.meta.url)("../../package.json");
+    expect(packageVersion()).toBe(pkg.version);
+    expect(packageVersion()).not.toBe("0.0.0");
+  });
+});

@@ -3,7 +3,7 @@
   "name": "io.github.expertvagabond/coldstar-agent-signer",
   "title": "Coldstar Agent Signer",
   "description": "Solana signing for AI agents: in-policy auto-signs, out-of-policy escalates, blocked never signs.",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "websiteUrl": "https://coldstar.dev/agent-signing",
   "repository": {
     "url": "https://github.com/ExpertVagabond/coldstar-agent-signer",
@@ -14,7 +14,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "coldstar-agent-signer",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "transport": {
         "type": "stdio"
       },

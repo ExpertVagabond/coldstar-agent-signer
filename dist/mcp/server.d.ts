@@ -9,5 +9,12 @@ export interface McpServerOptions {
     name?: string;
     version?: string;
 }
+/**
+ * The version an MCP client sees. Read from our own package.json rather than
+ * written here: this drifted once already — the server advertised 0.1.0 while
+ * the package was 0.4.1, which a client and the registry both surface. There is
+ * a test asserting these agree, so it cannot drift again silently.
+ */
+export declare function packageVersion(): string;
 export declare function createColdstarMcpServer(opts: McpServerOptions): McpServer;
 //# sourceMappingURL=server.d.ts.map
