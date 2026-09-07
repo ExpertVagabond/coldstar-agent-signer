@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.expertvagabond/coldstar-agent-signer",
   "title": "Coldstar Agent Signer",
-  "description": "Policy-gated Solana signing for AI agents. In-policy transactions auto-sign on a cold-rooted session key, out-of-policy transactions escalate to air-gapped human approval, and disallowed or injected transactions are rejected without ever producing a signature.",
+  "description": "Solana signing for AI agents: in-policy auto-signs, out-of-policy escalates, blocked never signs.",
   "version": "0.4.1",
   "websiteUrl": "https://coldstar.dev/agent-signing",
   "repository": {
