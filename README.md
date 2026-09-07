@@ -4,6 +4,10 @@ Agent-safe signing for Coldstar. Lets an AI agent transact on Solana **without e
 
 Three layers, all here and tested: a pure policy engine, a fail-closed transaction decoder, and two ways to hold the wallet — `ColdstarWallet` (a drop-in for Solana Agent Kit's `BaseWallet`) and `coldstar-signer-mcp` (an MCP server for Claude, Cursor, or any MCP client). Beta, devnet.
 
+![A compromised agent asks for a payment to a blocklisted address and is refused](examples/out/reject-demo.gif)
+
+That runs here: `npm run demo`. Real policy engine, real decoder, real Ed25519 session key, no network. The compromised agent asks correctly and is refused anyway, and the signature it wanted never exists.
+
 ## Why this shape
 
 The decision logic (`src/policy/evaluate.ts`) is a **pure function** over a normalized `TxIntent` — no I/O, no `@solana/*` imports. That's deliberate: the part that must be correct is exhaustively unit-testable without a validator, a network, or a wallet. Parsing a raw transaction into `{ outSol, recipients, instructions }` is the adapter's job, where a bug is a reliability issue, not a security hole.
@@ -114,6 +118,19 @@ The same wallet as an MCP server. The model gets five tools and never a key; eve
   }
 }
 ```
+
+In Claude Code that is one command:
+
+```bash
+claude mcp add coldstar \
+  -e COLDSTAR_POLICY=/abs/path/envelope.json \
+  -e COLDSTAR_SESSION_KEYFILE=/abs/path/session.json \
+  -e COLDSTAR_ROOT_PUBKEY=<root pubkey> \
+  -e COLDSTAR_REQUIRE_ENVELOPE=1 \
+  -- npx -y -p coldstar-agent-signer coldstar-signer-mcp
+```
+
+Point `COLDSTAR_POLICY` at a root-signed envelope rather than a bare policy file, and pin the root. A bare policy is a file the agent's own host can edit; an envelope is not.
 
 | Tool | What it does |
 |---|---|

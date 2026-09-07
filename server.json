@@ -1,0 +1,82 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.expertvagabond/coldstar-agent-signer",
+  "title": "Coldstar Agent Signer",
+  "description": "Policy-gated Solana signing for AI agents. In-policy transactions auto-sign on a cold-rooted session key, out-of-policy transactions escalate to air-gapped human approval, and disallowed or injected transactions are rejected without ever producing a signature.",
+  "version": "0.4.1",
+  "websiteUrl": "https://coldstar.dev/agent-signing",
+  "repository": {
+    "url": "https://github.com/ExpertVagabond/coldstar-agent-signer",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "coldstar-agent-signer",
+      "version": "0.4.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "COLDSTAR_POLICY",
+          "description": "Path to the policy file, or to a root-signed policy envelope. The envelope is the intended form: it is what makes the limits unforgeable by the agent.",
+          "isRequired": true
+        },
+        {
+          "name": "COLDSTAR_SESSION_KEYFILE",
+          "description": "Path to the session keypair file. This key spends only within the policy and is never the root key.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "COLDSTAR_SESSION_KEY",
+          "description": "The session secret key inline, as an alternative to COLDSTAR_SESSION_KEYFILE. Prefer the keyfile.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "RPC_URL",
+          "description": "Solana RPC endpoint. Defaults to devnet; this package is beta and devnet is the supported target.",
+          "isRequired": false
+        },
+        {
+          "name": "COLDSTAR_ROOT_PUBKEY",
+          "description": "Pins the root public key that must have signed the policy envelope. Without it the signer warns, because an unpinned root means any root will do.",
+          "isRequired": false
+        },
+        {
+          "name": "COLDSTAR_REQUIRE_ENVELOPE",
+          "description": "Set to 1 to refuse a bare policy file and accept only a root-signed envelope.",
+          "isRequired": false
+        },
+        {
+          "name": "COLDSTAR_CHECK_REVOCATION",
+          "description": "Set to 1 to check the on-chain revocation marker before every decision. Fail-closed: a revoked grant rejects, an unreachable chain escalates.",
+          "isRequired": false
+        },
+        {
+          "name": "COLDSTAR_LEDGER",
+          "description": "Path to the spend ledger that carries the daily cap across restarts.",
+          "isRequired": false
+        },
+        {
+          "name": "COLDSTAR_CHAIN_LEDGER",
+          "description": "Set to 1 to read the day's real spend back from the chain, so deleting the local ledger cannot reset the daily cap.",
+          "isRequired": false
+        },
+        {
+          "name": "COLDSTAR_SIMULATE",
+          "description": "Set to 1 to simulate opaque transactions before deciding, or 'always' to simulate every transaction. The wallet then takes the larger of the static and simulated debit.",
+          "isRequired": false
+        },
+        {
+          "name": "COLDSTAR_ALLOW_MESSAGE_SIGNING",
+          "description": "Set to 1 to allow arbitrary message signing. Off by default, because a signed message is a capability the policy cannot inspect.",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}

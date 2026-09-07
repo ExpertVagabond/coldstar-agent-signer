@@ -11,3 +11,6 @@ node_modules/
 coldstar.policy.local.json
 .env
 .env.*
+
+# Python bytecode from the offline signer tool.
+__pycache__/
