@@ -1,6 +1,6 @@
 {
   "name": "coldstar-agent-signer",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "mcpName": "io.github.expertvagabond/coldstar-agent-signer",
   "description": "Agent-safe signing for Coldstar — policy-gated auto-sign / air-gapped escalation / reject. The agent never holds the root key.",
   "author": "Matthew Karsten <matthewkarstenconnects@gmail.com>",
@@ -31,7 +31,8 @@
   "bin": {
     "coldstar-signer-mcp": "dist/mcp/cli.js",
     "coldstar-sign-policy": "dist/cli/signPolicy.js",
-    "coldstar-revoke": "dist/cli/revoke.js"
+    "coldstar-revoke": "dist/cli/revoke.js",
+    "coldstar-encrypt-key": "dist/cli/encryptKey.js"
   },
   "exports": {
     ".": {
@@ -64,6 +65,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "@noble/hashes": "^1.4.0",
     "bs58": "^6.0.0",
     "zod": "^3.25.0"
   },

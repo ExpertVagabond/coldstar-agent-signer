@@ -6,7 +6,9 @@ Status: beta, pre-audit. Devnet. The signing core and policy engine are in scope
 
 ## What this actually protects
 
-The root key is an AES-256-GCM ciphertext on a drive you hold. It is decrypted into memory-locked RAM on a machine with no network path, for as long as it takes to sign, and wiped. Online, an agent holds a disposable session key bounded by a policy the root signed. Every transaction it proposes is decoded and evaluated before a signature exists.
+The root key is an AES-256-GCM ciphertext on a drive you hold, under a key derived from your passphrase with Argon2id (64 MiB, t=3, p=4). It is decrypted on a machine with no network path, for as long as it takes to sign one policy envelope, and the buffers are then zeroed. Online, an agent holds a disposable session key bounded by a policy the root signed. Every transaction it proposes is decoded and evaluated before a signature exists.
+
+Two limits on that sentence, because they are the kind a vendor is tempted to leave out. The plaintext seed exists in this process's heap while the envelope is signed; neither `coldstar-sign-policy` nor the Python tool locks those pages, so a sufficiently determined local attacker or a swap file could see them. And zeroing a JavaScript or Python buffer does not reach copies the runtime may already have made. What genuinely protects the key in use is that the machine doing the decryption is not reachable, not the wiping.
 
 That removes one specific class of loss: the remote attacker. Malware on your everyday machine, a compromised dependency, a hijacked browser extension, a prompt-injected agent. None of them can reach a key that is not on a networked machine, and none of them can make the online session key exceed its policy.
 
@@ -35,7 +37,7 @@ Switching Wi-Fi off in software is not an air gap. Neither is a machine you also
 A setup that earns the name:
 
 1. **A dedicated machine.** An old laptop with the wireless card physically removed, or a Raspberry Pi that has never been on a network. Not the machine you read email on.
-2. **A fresh install.** Ideally a live USB image booted read-only, so nothing persists between sessions and there is nowhere for a keylogger to live. `tools/coldstar_sign_policy.py` needs only `python3`, so the offline machine does not need Node or a package install.
+2. **A fresh install.** Ideally a live USB image booted read-only, so nothing persists between sessions and there is nowhere for a keylogger to live. `tools/coldstar_sign_policy.py` runs on a stock `python3`, so the offline machine does not need Node. One caveat, stated because it bites at exactly the wrong moment: reading an *encrypted* root needs Argon2id and AES-256-GCM, which Python does not ship. Install `cryptography` (42 or newer carries both) while you are building the machine, before it goes offline. Signing itself still needs nothing.
 3. **Nothing else on it.** Every package you add is code that runs next to your key.
 4. **Data crosses as data, not as a device you re-plug.** QR is the good pattern: a camera reads pixels and cannot mount a filesystem. If you use a USB drive, treat it as one-directional and never carry it back to the offline machine after it has been in an online one.
 5. **Type the passphrase on the offline machine only.** It should never exist on a networked device, including in a password manager that syncs.

@@ -54,6 +54,7 @@ raw tx ──(project + parseTx, fail-closed)──▶ TxIntent ──(evaluate)
 | `src/policy/crossLanguage.test.ts` | ✅ 7 tests: the Python output verifies in TypeScript, and both sign identical bytes |
 | `src/policy/revocation.ts` | ✅ on-chain revocation: signed memo marker, `RevocationChecker`, fail-closed |
 | `src/policy/airgap.ts` | ✅ the cold-side tool refuses to read the root key on a networked machine |
+| `src/policy/keyfile.ts` | ✅ 17 tests: the root is Argon2id + AES-256-GCM at rest, and opens in the Python tool |
 | `THREAT-MODEL.md` | ✅ what this protects, what it does not, and how to build an air gap that earns the name |
 | `src/cli/revoke.ts` | ✅ `coldstar-revoke` — cancel a grant early |
 | `src/policy/revocation.test.ts` | ✅ 13 tests incl. forged-marker and unreachable-chain cases |
@@ -64,12 +65,29 @@ raw tx ──(project + parseTx, fail-closed)──▶ TxIntent ──(evaluate)
 The cold root never signs transactions for the agent. It signs a **policy envelope** once, on the air-gapped machine: the policy, the one session public key it applies to, an issue time, and an expiry, canonically encoded and Ed25519-signed. The online signer verifies that signature at startup and refuses to run if the policy was edited, the session key is not the one named, the envelope has expired, or (when pinned) the root is not the expected one.
 
 ```bash
-# on the AIR-GAPPED machine (root keyfile never leaves it)
-coldstar-sign-policy --root /media/cold/root.json --policy coldstar.policy.json \
+# once, on the AIR-GAPPED machine: encrypt the root, then destroy the plaintext
+coldstar-encrypt-key --in root.json --out /media/cold/root.coldstar.json && rm -P root.json
+
+# every time you issue a grant (root keyfile never leaves this machine)
+coldstar-sign-policy --root /media/cold/root.coldstar.json --policy coldstar.policy.json \
   --session <session pubkey> --expires 7d > envelope.json
 # carry envelope.json across the gap (QR / file), then on the online host:
 COLDSTAR_POLICY=envelope.json COLDSTAR_ROOT_PUBKEY=<root pubkey> COLDSTAR_REQUIRE_ENVELOPE=1 coldstar-signer-mcp
 ```
+
+### The root key at rest
+
+Until 0.6.0 this package read its root from a plaintext `solana-keygen` file, which is the exact thing Coldstar exists to argue against. It no longer does. `coldstar-encrypt-key` writes the same container the Coldstar signer uses, so a key encrypted by either tool opens in the other:
+
+```json
+{ "version": 1, "salt": "…", "nonce": "…", "ciphertext": "…", "public_key": "9QZ…" }
+```
+
+Argon2id (v1.3, m = 64 MiB, t = 3, p = 4) turns the passphrase and a fresh 32-byte salt into a 32-byte key; AES-256-GCM under a fresh 12-byte nonce encrypts the 32-byte Ed25519 seed, with the tag appended. `public_key` is there so tooling can tell you *which* root a file holds, and check it is the one you meant, before spending 64 MB on a derivation.
+
+The passphrase is never an argument, because arguments are visible in `ps` and land in shell history. `coldstar-sign-policy` prompts with echo off at a terminal, reads one line when stdin is a pipe, and honours `COLDSTAR_PASSPHRASE` while warning that a variable is inherited by every child process. A wrong passphrase fails the GCM tag and is reported as such; nothing is written to stdout that could be mistaken for a good envelope.
+
+A plaintext root still works, so nobody's setup breaks on upgrade, but it prints a warning every time. Lose the passphrase and the key is gone. That is the design, not a gap in it.
 
 ### Revoking a grant early
 
@@ -91,11 +109,11 @@ In code: `ColdstarWallet.fromEnvelope({ envelope, expectedRoot, session, rpcUrl,
 A machine that earns the name is usually a minimal install or a read-only live image. Those have `python3`; they often do not have Node, and `pip install` wants the network you just removed. So the same signer ships as one dependency-free Python file:
 
 ```bash
-./tools/coldstar_sign_policy.py --root root.json --policy coldstar.policy.json \
+./tools/coldstar_sign_policy.py --root root.coldstar.json --policy coldstar.policy.json \
   --session <session pubkey> --expires 7d > envelope.json
 ```
 
-It produces byte-identical envelopes, uses PyNaCl when installed and a vendored RFC 8032 Ed25519 otherwise, and runs the same air-gap check. The format is written down in [`ENVELOPE-SPEC.md`](ENVELOPE-SPEC.md) so a third implementation is possible; `src/policy/crossLanguage.test.ts` runs the real script and verifies its output with the real verifier, and asserts both languages sign the same bytes.
+It reads the same encrypted container, produces byte-identical envelopes, uses PyNaCl when installed and a vendored RFC 8032 Ed25519 otherwise, and runs the same air-gap check. Signing needs only the standard library; opening an encrypted root needs `cryptography` (42+, which carries both Argon2id and AES-256-GCM) or `argon2-cffi` beside it, so install that before the machine goes offline. The format is written down in [`ENVELOPE-SPEC.md`](ENVELOPE-SPEC.md) so a third implementation is possible; `src/policy/crossLanguage.test.ts` runs the real script and verifies its output with the real verifier, and asserts both languages sign the same bytes.
 
 The vendored fallback is not constant-time. That is stated in the file and is the reason it is scoped to the air-gapped machine, where there is no attacker present to observe timing. A bare, unsigned `coldstar.policy.json` still works for tests and devnet; set `COLDSTAR_REQUIRE_ENVELOPE=1` anywhere it matters.
 

@@ -8,11 +8,17 @@
 //                        [--revoker <pubkey>]   a hot key that may revoke this grant on chain
 //                        [--allow-network]      override the air-gap check (do not, for a real root)
 //
+// The root may be an encrypted container from `coldstar-encrypt-key` (preferred,
+// and the same format the Coldstar signer uses) or a plaintext solana-keygen
+// file (deprecated, and warned about loudly).
+//
 // Nothing here touches a network. The root secret never leaves this process.
 import { readFileSync } from "node:fs";
 import { Keypair } from "@solana/web3.js";
 import { signPolicyEnvelope, parsePolicy } from "../policy/envelope.js";
 import { checkAirGap, describeAirGap } from "../policy/airgap.js";
+import { decryptRootKey, isEncryptedKeyContainer, wipe } from "../policy/keyfile.js";
+import { readPassphrase } from "./passphrase.js";
 function arg(name) {
     const i = process.argv.indexOf(`--${name}`);
     return i >= 0 ? process.argv[i + 1] : undefined;
@@ -51,13 +57,46 @@ if (!gap.airGapped && !process.argv.includes("--allow-network")) {
 if (!gap.airGapped) {
     process.stderr.write("coldstar-sign-policy: WARNING — signing the root key on a NETWORKED machine (--allow-network).\n");
 }
-const root = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(rootPath, "utf8"))));
+// The root may be an encrypted container (preferred) or a plaintext
+// solana-keygen array (deprecated: it is the thing Coldstar exists to avoid).
+let rootRaw;
+try {
+    rootRaw = JSON.parse(readFileSync(rootPath, "utf8"));
+}
+catch (e) {
+    fail(`cannot read ${rootPath}: ${e.message}`);
+}
+let root;
+let seed;
+if (isEncryptedKeyContainer(rootRaw)) {
+    const passphrase = await readPassphrase(`Passphrase for ${rootRaw.public_key ?? rootPath}: `);
+    process.stderr.write("deriving the key (Argon2id, 64 MB)…\n");
+    try {
+        seed = decryptRootKey(rootRaw, passphrase);
+    }
+    catch (e) {
+        fail(e.message);
+    }
+    root = Keypair.fromSeed(seed);
+    if (rootRaw.public_key && rootRaw.public_key !== root.publicKey.toBase58()) {
+        fail("the container's public_key does not match the key inside it");
+    }
+}
+else if (Array.isArray(rootRaw)) {
+    process.stderr.write("WARNING: this root key is stored in PLAINTEXT. Encrypt it with `coldstar-encrypt-key`;\n" +
+        "         a plaintext key on disk is exactly what Coldstar exists to avoid.\n");
+    root = Keypair.fromSecretKey(Uint8Array.from(rootRaw));
+}
+else {
+    fail(`${rootPath} is neither an encrypted container nor a solana-keygen key file`);
+}
 const policy = parsePolicy(JSON.parse(readFileSync(policyPath, "utf8")));
 for (const k of ["allowRecipients", "blockRecipients"]) {
     if (policy[k].some((v) => v.startsWith("<") || v.startsWith("$")))
         fail(`policy.${k} still has a placeholder`);
 }
 const envelope = signPolicyEnvelope({ rootSecretKey: root.secretKey, policy, sessionPubkey, expiresAt, ...(revoker ? { revoker } : {}) });
+wipe(seed); // the signature is made; the key material has no further use here
 process.stdout.write(JSON.stringify(envelope, null, 2) + "\n");
 process.stderr.write(`signed by root ${envelope.rootPubkey} for session ${sessionPubkey}` +
     (expiresAt ? `, expires ${envelope.expiresAt}` : ", no expiry (consider --expires)") +

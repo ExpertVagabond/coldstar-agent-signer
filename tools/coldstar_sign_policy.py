@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-"""Sign a Coldstar policy envelope on the air-gapped machine, with no dependencies.
+"""Sign a Coldstar policy envelope on the air-gapped machine.
 
 A machine that earns the name "air-gapped" is usually a minimal install or a
 read-only live image. Those have python3; they often do not have Node, and
 `pip install` needs the network you just removed. So this is a single file that
 runs on a stock Python 3.8+ and produces exactly what the TypeScript signer
-produces. The wire format is in ENVELOPE-SPEC.md; the two are cross-verified in
+produces.
+
+One honest caveat about dependencies. Signing needs nothing beyond the standard
+library. Reading an ENCRYPTED root key needs Argon2id and AES-256-GCM, which
+Python does not ship, so it needs `cryptography` (>= 42, which carries both) or
+`argon2-cffi` alongside it. Install that on the offline machine while you build
+it, before it goes offline. A plaintext root still needs nothing at all — and
+still should not exist. The wire format is in ENVELOPE-SPEC.md; the two are cross-verified in
 src/policy/crossLanguage.test.ts.
 
     ./coldstar_sign_policy.py --root root.json --policy coldstar.policy.json \\
@@ -24,6 +31,118 @@ import os
 import socket
 import sys
 from datetime import datetime, timedelta, timezone
+
+# ------------------------------------------------- encrypted root key
+
+# The container written by `coldstar-encrypt-key` and by the Coldstar signer:
+# Argon2id (v1.3, m = 64 MiB, t = 3, p = 4) over the passphrase and a 32-byte
+# salt, then AES-256-GCM over the 32-byte Ed25519 seed, tag appended. Field
+# names and parameters must match secure_signer/src/crypto.rs exactly; a key
+# encrypted by one tool has to open in the other.
+
+ARGON2_MEMORY_KIB = 65536
+ARGON2_TIME_COST = 3
+ARGON2_PARALLELISM = 4
+
+_KEYFILE_HELP = (
+    "Reading an encrypted root key needs Argon2id and AES-256-GCM, which the Python\n"
+    "standard library does not provide. Install one of these on the offline machine:\n"
+    "  pip install 'cryptography>=42'      # provides both\n"
+    "  pip install argon2-cffi cryptography\n"
+)
+
+
+def is_key_container(raw: object) -> bool:
+    """A container, as opposed to the plaintext solana-keygen byte array."""
+    return isinstance(raw, dict) and all(
+        isinstance(raw.get(k), str) for k in ("salt", "nonce", "ciphertext")
+    )
+
+
+def _derive_key(passphrase: str, salt: bytes) -> bytes:
+    """Argon2id via whichever backend is present. Both must agree byte for byte."""
+    try:
+        from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
+
+        return Argon2id(
+            salt=salt,
+            length=32,
+            iterations=ARGON2_TIME_COST,
+            lanes=ARGON2_PARALLELISM,
+            memory_cost=ARGON2_MEMORY_KIB,
+        ).derive(passphrase.encode("utf-8"))
+    except ImportError:
+        pass
+    try:
+        from argon2.low_level import Type, hash_secret_raw
+
+        return hash_secret_raw(
+            secret=passphrase.encode("utf-8"),
+            salt=salt,
+            time_cost=ARGON2_TIME_COST,
+            memory_cost=ARGON2_MEMORY_KIB,
+            parallelism=ARGON2_PARALLELISM,
+            hash_len=32,
+            type=Type.ID,
+        )
+    except ImportError:
+        die("no Argon2id implementation available.\n" + _KEYFILE_HELP)
+
+
+def decrypt_root_key(container: dict, passphrase: str) -> bytes:
+    """Return the 32-byte Ed25519 seed, or exit with a clear reason."""
+    import base64
+
+    if int(container.get("version", 1)) != 1:
+        die(f"unsupported key container version {container.get('version')}")
+    salt = base64.b64decode(container["salt"])
+    nonce = base64.b64decode(container["nonce"])
+    blob = base64.b64decode(container["ciphertext"])
+    if len(salt) != 32:
+        die(f"salt must be 32 bytes, got {len(salt)}")
+    if len(nonce) != 12:
+        die(f"nonce must be 12 bytes, got {len(nonce)}")
+    if len(blob) <= 16:
+        die("ciphertext is too short to contain a GCM tag")
+
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        from cryptography.exceptions import InvalidTag
+    except ImportError:
+        die("no AES-256-GCM implementation available.\n" + _KEYFILE_HELP)
+
+    sys.stderr.write("deriving the key (Argon2id, 64 MB)...\n")
+    key = _derive_key(passphrase, salt)
+    try:
+        # The Rust aes-gcm crate and Python's AESGCM both take ciphertext||tag.
+        seed = AESGCM(key).decrypt(nonce, blob, None)
+    except InvalidTag:
+        die("wrong passphrase, or the key file has been altered")
+    finally:
+        del key
+    if len(seed) != 32:
+        die(f"decrypted key is {len(seed)} bytes, expected 32")
+    return seed
+
+
+def read_passphrase() -> str:
+    """Never an argument: process arguments show up in `ps` and shell history."""
+    from_env = os.environ.get("COLDSTAR_PASSPHRASE")
+    if from_env:
+        sys.stderr.write(
+            "warning: using COLDSTAR_PASSPHRASE from the environment; "
+            "it is inherited by child processes\n"
+        )
+        return from_env
+    if not sys.stdin.isatty():
+        line = sys.stdin.readline()
+        if not line:
+            die("no passphrase on stdin")
+        return line.rstrip("\r\n")
+    import getpass
+
+    return getpass.getpass("Passphrase for the root key: ")
+
 
 # ---------------------------------------------------------------- base58
 
@@ -158,6 +277,25 @@ def sign_ed25519(message: bytes, secret64: bytes) -> bytes:
         return _sign_pure(message, secret64)
 
 
+def ed25519_publickey(seed: bytes) -> bytes:
+    """Public key for a 32-byte seed.
+
+    Needed only on the encrypted path: the container stores the seed alone, the
+    way the Rust signer does, so the public half has to be recomputed. The
+    plaintext solana-keygen format carries both halves and skips this.
+    """
+    if len(seed) != 32:
+        raise ValueError(f"seed must be 32 bytes, got {len(seed)}")
+    try:
+        from nacl.signing import SigningKey  # type: ignore
+
+        return bytes(SigningKey(seed).verify_key)
+    except ImportError:
+        h = hashlib.sha512(seed).digest()
+        a = (1 << 254) + (int.from_bytes(h[:32], "little") & ((1 << 254) - 8))
+        return _encodepoint(_scalarmult(_B, a))
+
+
 def using_pynacl() -> bool:
     try:
         import nacl.signing  # noqa: F401  # type: ignore
@@ -263,7 +401,23 @@ def main() -> int:
         sys.stderr.write("coldstar_sign_policy: WARNING — signing the root key on a NETWORKED machine (--allow-network).\n")
 
     with open(args.root, "r", encoding="utf-8") as f:
-        secret = bytes(json.load(f))
+        root_raw = json.load(f)
+    if is_key_container(root_raw):
+        seed = decrypt_root_key(root_raw, read_passphrase())
+        # Ed25519 secret keys are seed||public; derive the public half from the seed.
+        secret = seed + ed25519_publickey(seed)
+        claimed = root_raw.get("public_key")
+        if claimed and claimed != b58encode(secret[32:]):
+            die("--root: the container's public_key does not match the key inside it")
+    elif isinstance(root_raw, list):
+        sys.stderr.write(
+            "WARNING: this root key is stored in PLAINTEXT. Encrypt it with "
+            "`coldstar-encrypt-key`;\n         a plaintext key on disk is exactly what "
+            "Coldstar exists to avoid.\n"
+        )
+        secret = bytes(root_raw)
+    else:
+        die("--root: neither an encrypted container nor a solana-keygen key file")
     if len(secret) != 64:
         die(f"--root: expected a 64-byte keypair, got {len(secret)} bytes")
     with open(args.policy, "r", encoding="utf-8") as f:

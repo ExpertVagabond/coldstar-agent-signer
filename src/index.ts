@@ -16,6 +16,8 @@ export { rpcSimulator } from "./wallet/simulate.js";
 export { FileSpendLedger } from "./wallet/ledger.js";
 export { ChainSpendLedger } from "./wallet/chainLedger.js";
 export type { ChainSpendLedgerOptions } from "./wallet/chainLedger.js";
+export { encryptRootKey, decryptRootKey, isEncryptedKeyContainer, wipe } from "./policy/keyfile.js";
+export type { EncryptedKeyContainer } from "./policy/keyfile.js";
 export { checkAirGap, describeAirGap, activeInterfaces } from "./policy/airgap.js";
 export type { AirGapCheck, ActiveInterface } from "./policy/airgap.js";
 export { RevocationChecker, revocationMemo, buildRevocationTransaction, MEMO_PROGRAM_ID } from "./policy/revocation.js";

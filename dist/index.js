@@ -8,6 +8,7 @@ export { createColdstarMcpServer } from "./mcp/server.js";
 export { rpcSimulator } from "./wallet/simulate.js";
 export { FileSpendLedger } from "./wallet/ledger.js";
 export { ChainSpendLedger } from "./wallet/chainLedger.js";
+export { encryptRootKey, decryptRootKey, isEncryptedKeyContainer, wipe } from "./policy/keyfile.js";
 export { checkAirGap, describeAirGap, activeInterfaces } from "./policy/airgap.js";
 export { RevocationChecker, revocationMemo, buildRevocationTransaction, MEMO_PROGRAM_ID } from "./policy/revocation.js";
 export { signPolicyEnvelope, verifyPolicyEnvelope, parsePolicy, isEnvelope, PolicySchema } from "./policy/envelope.js";
