@@ -23,6 +23,7 @@ export const TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 export const TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 export const ASSOCIATED_TOKEN_PROGRAM_ID = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 export const COMPUTE_BUDGET_PROGRAM_ID = "ComputeBudget111111111111111111111111111111";
+export const STAKE_PROGRAM_ID = "Stake11111111111111111111111111111111111111";
 export const MEMO_PROGRAM_ID = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
 export const MEMO_LEGACY_PROGRAM_ID = "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo";
 const TOKEN_PROGRAMS = new Set([TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]);
@@ -204,6 +205,62 @@ function decodeTokenIx(ix, feePayer) {
         value: self,
         movement: { mint, amount, ...(decimals !== undefined ? { decimals } : {}), destination, source },
     };
+}
+/*
+ * ── STAKE ───────────────────────────────────────────────────────────────────
+ * An agent managing a treasury will delegate and undelegate stake, none of
+ * which moves value. Two things here do:
+ *
+ *   Withdraw moves lamports out of the stake account to a recipient, so it is
+ *   counted and the recipient is checked like any other payment.
+ *
+ *   Authorize hands the staker or withdrawer role to someone else. That is the
+ *   Stake program's version of `Approve`: it moves nothing today and lets the
+ *   new authority take everything tomorrow, with no further signature from us.
+ *   It is refused, as are the seeded and checked variants and SetLockup.
+ *
+ * Discriminants are u32 LE, as in the System program.
+ */
+const STAKE_WITHDRAW = 4;
+/** Non-value: delegation, deactivation, merging and initialisation. */
+const STAKE_NON_VALUE = new Set([0, 2, 5, 7, 9, 13, 14]);
+const STAKE_DANGEROUS = {
+    1: "Authorize (hands the staker or withdrawer role to another key)",
+    6: "SetLockup",
+    8: "AuthorizeWithSeed (hands over the staker or withdrawer role)",
+    10: "AuthorizeChecked (hands over the staker or withdrawer role)",
+    11: "AuthorizeCheckedWithSeed (hands over the staker or withdrawer role)",
+    12: "SetLockupChecked",
+};
+function decodeStakeIx(ix, feePayer) {
+    const data = ix.data;
+    if (!data || data.length < 4)
+        return { ok: false, reason: "stake instruction has no/short data" };
+    const disc = readU32LE(data, 0);
+    if (disc === undefined)
+        return { ok: false, reason: "stake discriminant unreadable" };
+    const danger = STAKE_DANGEROUS[disc];
+    if (danger)
+        return { ok: false, reason: `stake instruction ${disc}: ${danger}` };
+    // Split moves lamports into a new stake account that inherits our authorities,
+    // so nothing leaves our control.
+    if (STAKE_NON_VALUE.has(disc) || disc === 3)
+        return { ok: true, value: { programId: ix.programAddress } };
+    if (disc !== STAKE_WITHDRAW)
+        return { ok: false, reason: `unknown stake instruction discriminant ${disc}` };
+    const lamports = readU64(data, 4);
+    if (lamports === undefined)
+        return { ok: false, reason: "stake Withdraw has no lamports field" };
+    const accounts = ix.accounts ?? [];
+    const recipient = accounts[1]?.address;
+    const withdrawAuthority = accounts[4]?.address;
+    if (recipient === undefined || withdrawAuthority === undefined) {
+        return { ok: false, reason: "stake Withdraw is missing accounts" };
+    }
+    // Someone else's stake, withdrawn under their own authority, is not our exposure.
+    if (withdrawAuthority !== feePayer)
+        return { ok: true, value: { programId: ix.programAddress } };
+    return { ok: true, value: { programId: ix.programAddress, recipient, lamports: Number(lamports) } };
 }
 /*
  * ── COMPUTE BUDGET ──────────────────────────────────────────────────────────
@@ -447,11 +504,13 @@ export function parseTx(message) {
                     ? decodeSquadsIx(ix, message.feePayer)
                     : ix.programAddress === COMPUTE_BUDGET_PROGRAM_ID
                         ? decodeComputeBudgetIx(ix, computeBudget)
-                        : ix.programAddress === ASSOCIATED_TOKEN_PROGRAM_ID
-                            ? decodeAtaIx(ix, message.feePayer)
-                            : ix.programAddress === MEMO_PROGRAM_ID || ix.programAddress === MEMO_LEGACY_PROGRAM_ID
-                                ? { ok: true, value: { programId: ix.programAddress } }
-                                : classifyOpaqueProgram(ix);
+                        : ix.programAddress === STAKE_PROGRAM_ID
+                            ? decodeStakeIx(ix, message.feePayer)
+                            : ix.programAddress === ASSOCIATED_TOKEN_PROGRAM_ID
+                                ? decodeAtaIx(ix, message.feePayer)
+                                : ix.programAddress === MEMO_PROGRAM_ID || ix.programAddress === MEMO_LEGACY_PROGRAM_ID
+                                    ? { ok: true, value: { programId: ix.programAddress } }
+                                    : classifyOpaqueProgram(ix);
         if (!decoded.ok)
             return { ok: false, reason: decoded.reason };
         instructions.push(decoded.value);

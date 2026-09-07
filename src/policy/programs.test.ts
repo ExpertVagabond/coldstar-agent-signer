@@ -177,3 +177,59 @@ describe("a program still has to be allowlisted", () => {
     expect(v.reason).toMatch(/not in allowPrograms/);
   });
 });
+
+describe("stake: withdrawing is spending, handing over the authority is worse", () => {
+  const stakeAccount = Keypair.generate().publicKey;
+  const stake = (ix: { data: Buffer; keys: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[] }) =>
+    new TransactionInstruction({ programId: new PublicKey("Stake11111111111111111111111111111111111111"), ...ix });
+  const u32 = (n: number) => { const b = Buffer.alloc(4); b.writeUInt32LE(n); return b; };
+  const withdrawIx = (lamports: number, authority = session.publicKey, recipient = payee) => {
+    const data = Buffer.concat([u32(4), (() => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(lamports)); return b; })()]);
+    return stake({ data, keys: [stakeAccount, recipient, PublicKey.default, PublicKey.default, authority].map((pubkey, i) => ({ pubkey, isSigner: i === 4, isWritable: i < 2 })) });
+  };
+  const p = () => policy({ allowPrograms: [SystemProgram.programId.toBase58(), "Stake11111111111111111111111111111111111111"] });
+
+  it("delegating and deactivating move nothing", async () => {
+    for (const disc of [2, 5, 7]) {
+      const v = await wallet(p()).evaluateTx(tx(stake({ data: u32(disc), keys: [] })));
+      expect(v.decision).toBe("AUTO_SIGN");
+      expect(v.intent?.outSol).toBe(0);
+    }
+  });
+
+  it("a withdrawal is counted and checked against the recipient allowlist", async () => {
+    const ok = await wallet(p()).evaluateTx(tx(withdrawIx(0.02 * LAMPORTS_PER_SOL)));
+    expect(ok.decision).toBe("AUTO_SIGN");
+    expect(ok.intent?.outSol).toBeCloseTo(0.02, 9);
+
+    const stranger = Keypair.generate().publicKey;
+    const bad = await wallet(p()).evaluateTx(tx(withdrawIx(0.02 * LAMPORTS_PER_SOL, session.publicKey, stranger)));
+    expect(bad.decision).toBe("ESCALATE");
+    expect(bad.reason).toMatch(/not in allowRecipients/);
+  });
+
+  it("a withdrawal over the limit escalates", async () => {
+    const v = await wallet(p()).evaluateTx(tx(withdrawIx(5 * LAMPORTS_PER_SOL)));
+    expect(v.decision).toBe("ESCALATE");
+  });
+
+  it("someone else's stake, under their own authority, is not our spend", async () => {
+    const v = await wallet(p()).evaluateTx(tx(withdrawIx(9 * LAMPORTS_PER_SOL, Keypair.generate().publicKey)));
+    expect(v.decision).toBe("AUTO_SIGN");
+    expect(v.intent?.outSol).toBe(0);
+  });
+
+  it("handing over the withdraw authority escalates: it moves nothing today and everything tomorrow", async () => {
+    for (const disc of [1, 8, 10, 11]) {
+      const v = await wallet(p()).evaluateTx(tx(stake({ data: u32(disc), keys: [] })));
+      expect(v.decision).toBe("ESCALATE");
+      expect(v.reason).toMatch(/hands (the staker or withdrawer role|over)/);
+    }
+  });
+
+  it("an unknown stake instruction escalates", async () => {
+    const v = await wallet(p()).evaluateTx(tx(stake({ data: u32(99), keys: [] })));
+    expect(v.decision).toBe("ESCALATE");
+    expect(v.reason).toMatch(/unknown stake instruction/);
+  });
+});
