@@ -175,6 +175,24 @@ Crucially, Squads is not one opaque allowlisted program. The instructions that w
 
 Nothing here needs Squads' permission: the v4 program is AGPL and permissionless on mainnet and devnet, and the tests build their instructions with `@sqds/multisig` itself.
 
+`examples/squads-devnet-demo.mjs` runs the whole thing against real devnet — it creates the multisig, adds a spending limit naming the agent's session key, funds the vault, and then shows the three outcomes:
+
+```
+── 1. the agent spends 0.005 SOL, inside both bounds
+  [policy] AUTO_SIGN within policy
+  -> landed on chain, payee received 0.005 SOL from the vault
+
+── 2. the agent asks for 0.04 SOL — the VAULT would allow it, the local policy does not
+  [policy] ESCALATE  amount 0.04 SOL exceeds escalate threshold 0.01
+  -> no signature exists, so this never reached the chain
+
+── 3. the agent tries to raise its own ceiling
+  [policy] ESCALATE  squads multisig_add_spending_limit (raises the agent's own ceiling)
+  -> refused before signing
+```
+
+Run it with `node examples/squads-devnet-demo.mjs --funder <devnet keyfile>`. It costs about 0.03 SOL and reuses the multisig on re-runs.
+
 ### What Coldstar can read
 
 An integration, for a policy signer, is a decoder. A program it cannot read is either escalate-everything, which makes the agent useless, or trust-blindly, which makes the limits a decoration. So the list of decoded programs is the list of things an agent can actually do:

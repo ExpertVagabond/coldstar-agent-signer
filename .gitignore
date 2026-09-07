@@ -14,3 +14,4 @@ coldstar.policy.local.json
 
 # Python bytecode from the offline signer tool.
 __pycache__/
+.squads-demo.json
