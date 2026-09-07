@@ -49,7 +49,7 @@ raw tx ──(project + parseTx, fail-closed)──▶ TxIntent ──(evaluate)
 | `src/wallet/chainLedger.test.ts` | ✅ 7 tests incl. the delete-the-file attack |
 | `src/policy/envelope.ts` | ✅ the root-signed policy envelope: `signPolicyEnvelope`, `verifyPolicyEnvelope`, `parsePolicy` (strict schema) |
 | `src/cli/signPolicy.ts` | ✅ `coldstar-sign-policy` — run on the cold machine; emits the envelope |
-| `tools/coldstar_sign_policy.py` | ✅ the same signer in Python with **no dependencies**, for an offline machine that has no Node |
+| `tools/coldstar_sign_policy.py` | ✅ the same signer in Python for an offline machine with no Node; **signing needs no dependencies**, opening an encrypted root needs `cryptography` |
 | `ENVELOPE-SPEC.md` | ✅ the wire format, so any language can produce a valid envelope |
 | `src/policy/crossLanguage.test.ts` | ✅ 7 tests: the Python output verifies in TypeScript, and both sign identical bytes |
 | `src/policy/revocation.ts` | ✅ on-chain revocation: signed memo marker, `RevocationChecker`, fail-closed |
@@ -106,7 +106,7 @@ In code: `ColdstarWallet.fromEnvelope({ envelope, expectedRoot, session, rpcUrl,
 
 ### No Node on the air-gapped machine?
 
-A machine that earns the name is usually a minimal install or a read-only live image. Those have `python3`; they often do not have Node, and `pip install` wants the network you just removed. So the same signer ships as one dependency-free Python file:
+A machine that earns the name is usually a minimal install or a read-only live image. Those have `python3`; they often do not have Node, and `pip install` wants the network you just removed. So the same signer ships as one Python file:
 
 ```bash
 ./tools/coldstar_sign_policy.py --root root.coldstar.json --policy coldstar.policy.json \

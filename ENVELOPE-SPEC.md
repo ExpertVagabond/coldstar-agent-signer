@@ -2,7 +2,7 @@
 
 A policy envelope is a root signature over a policy, bound to one session key and a validity window. It is the only thing the air-gapped root ever signs, and it is plain JSON so it can cross the gap as a file or a QR code.
 
-This document is the format, so an implementation in any language can produce an envelope the signer accepts. There are two in this repository already: `src/policy/envelope.ts` (TypeScript) and `tools/coldstar_sign_policy.py` (Python, no dependencies). Their outputs are cross-verified in `src/policy/crossLanguage.test.ts`.
+This document is the format, so an implementation in any language can produce an envelope the signer accepts. There are two in this repository already: `src/policy/envelope.ts` (TypeScript) and `tools/coldstar_sign_policy.py` (Python; signing needs no dependencies, opening an encrypted root needs a crypto library). Their outputs are cross-verified in `src/policy/crossLanguage.test.ts`.
 
 ## Canonical JSON
 
