@@ -169,6 +169,10 @@ Put the funds in a Squads vault, make the session key a member with a spending l
 
 Crucially, Squads is not one opaque allowlisted program. The instructions that would let an agent raise its own ceiling are separate instructions, so they are named and refused: `multisig_add_spending_limit`, `multisig_remove_spending_limit`, `config_transaction_execute`, `vault_transaction_execute`, `proposal_create` and `proposal_vote` all escalate to a human. An agent can spend inside its limit and cannot change the limit.
 
+![A routine spend signs, an over-policy USDC spend and a self-raised ceiling escalate, and a blocklisted destination is rejected](examples/out/squads-layered.gif)
+
+`npm run demo:squads` runs that. Every instruction is built with the real `@sqds/multisig` SDK, so it exercises the decoder against what the program actually dispatches on, and nothing is submitted — the multisig is a derived address.
+
 Nothing here needs Squads' permission: the v4 program is AGPL and permissionless on mainnet and devnet, and the tests build their instructions with `@sqds/multisig` itself.
 
 ### What Coldstar can read
