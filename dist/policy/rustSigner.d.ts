@@ -19,10 +19,11 @@ export interface RustSignature {
 /**
  * Sign arbitrary bytes with a key that never leaves the Rust process.
  *
- * The command is named `sign` and its field is `transaction`, but the signer
- * Ed25519-signs whatever bytes it is given and returns a detached signature
- * (`sign_with_secure_key` in `crypto.rs`), so a canonical policy payload works.
- * The `signed_transaction` field it also returns is meaningless here; ignore it.
+ * Uses the `sign_payload` action, which returns only a detached signature and
+ * the public key. Older signers do not have it, and for those this falls back to
+ * `sign`: that action Ed25519-signs whatever bytes it is given all the same, but
+ * calls them a transaction and returns a synthesised `signed_transaction` built
+ * by prepending a signature count to them, which is meaningless for a grant.
  */
 export declare function signWithRustSigner(bin: string, containerJson: string, passphrase: string, payload: Uint8Array): RustSignature;
 //# sourceMappingURL=rustSigner.d.ts.map

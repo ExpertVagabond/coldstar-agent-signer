@@ -91,18 +91,24 @@ export function rustSignerCapabilities(bin) {
 /**
  * Sign arbitrary bytes with a key that never leaves the Rust process.
  *
- * The command is named `sign` and its field is `transaction`, but the signer
- * Ed25519-signs whatever bytes it is given and returns a detached signature
- * (`sign_with_secure_key` in `crypto.rs`), so a canonical policy payload works.
- * The `signed_transaction` field it also returns is meaningless here; ignore it.
+ * Uses the `sign_payload` action, which returns only a detached signature and
+ * the public key. Older signers do not have it, and for those this falls back to
+ * `sign`: that action Ed25519-signs whatever bytes it is given all the same, but
+ * calls them a transaction and returns a synthesised `signed_transaction` built
+ * by prepending a signature count to them, which is meaningless for a grant.
  */
 export function signWithRustSigner(bin, containerJson, passphrase, payload) {
-    const out = runOneCommand(bin, {
-        action: "sign",
-        container: containerJson,
-        passphrase,
-        transaction: Buffer.from(payload).toString("base64"),
-    }, 120_000);
+    const data = Buffer.from(payload).toString("base64");
+    const timeout = 120_000; // Argon2id at 64 MB, plus process start
+    // `sign_payload` returns just the signature and public key. `sign` returns the
+    // same signature plus a `signed_transaction` synthesised by prepending a
+    // signature count to the payload, which for a policy grant is meaningless and
+    // invites something downstream to try broadcasting it. Prefer the narrower
+    // action, and fall back for signers that predate it (devsyrem/coldstar#14).
+    let out = runOneCommand(bin, { action: "sign_payload", container: containerJson, passphrase, payload: data }, timeout);
+    if (!out.success && /invalid json|unknown variant|missing field/i.test(String(out.error ?? ""))) {
+        out = runOneCommand(bin, { action: "sign", container: containerJson, passphrase, transaction: data }, timeout);
+    }
     if (!out.success) {
         const msg = (out.error ?? "unknown error").toString();
         if (/decrypt|passphrase|InvalidTag|DecryptionFailed/i.test(msg)) {
@@ -110,9 +116,9 @@ export function signWithRustSigner(bin, containerJson, passphrase, payload) {
         }
         throw new Error(`solana-signer: ${msg}`);
     }
-    const data = (out.data ?? {});
-    const signature = data.signature;
-    const publicKey = data.public_key ?? data.publicKey;
+    const result = (out.data ?? {});
+    const signature = result.signature;
+    const publicKey = result.public_key ?? result.publicKey;
     if (typeof signature !== "string" || typeof publicKey !== "string") {
         throw new Error("solana-signer returned no signature");
     }
