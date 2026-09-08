@@ -31,20 +31,25 @@ Original notes:
 
 Next command: see the worktree paths in this file as they are created.
 
-## 2. Draft the Squads approach — NOT STARTED
+## 2. Draft the Squads approach — DONE (NOT SENT)
 
-Deliverable is a document for Matthew to approve. Nothing goes out without
-per-batch approval.
+`$VS/projects/venture-ops/content/coldstar-squads-approach-2026-09-07.md`
+Private repo. Contains a draft message awaiting approval. Nothing has been sent.
+It names publishing 0.7.0 as a blocking prerequisite, because npm still serves
+0.5.0 with a plaintext root key.
 
-## 3. Parity story as a public page — IN PROGRESS
+## 3. Parity story as a public page — DONE
 
-Site is `$VS/projects/coldstar-website`, branch `redesign`, deploy with
-`wrangler pages deploy . --project-name coldstar --branch main`.
+Live at https://coldstar.dev/one-key-file (HTTP 200 verified), in the sitemap at
+priority 0.8, linked from the quickstart and the threat model.
 
-## 4. Audit prep — NOT STARTED
+## 4. Audit prep — DONE
 
-Scope what an auditor needs for `src/policy/evaluate.ts` and
-`src/adapter/parseTx.ts`.
+`AUDIT-SCOPE.md` in this repo. Names the two files where a bug becomes a loss,
+the invariant to attack, the three real bugs found so far as evidence of the
+pattern, the known weaknesses so nobody bills for rediscovering them, and the
+real coverage gap (evaluate.ts has 7 tests for the file that makes every
+decision).
 
 ## Standing gap
 
