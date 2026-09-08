@@ -102,6 +102,27 @@ export declare function signPolicyEnvelope(args: {
     /** Hot key allowed to revoke this grant on chain. Emits a version 2 envelope. */
     revoker?: string | null;
 }): PolicyEnvelope;
+/**
+ * Build an envelope without holding the root secret key here.
+ *
+ * The caller supplies a function that signs the canonical payload and says which
+ * public key it used. That lets the signing happen somewhere better than this
+ * process: Coldstar's Rust signer holds the key in `mlock`ed memory that is
+ * zeroized on drop, so with that path the plaintext key never exists in the
+ * JavaScript heap at all. `signPolicyEnvelope` above is the same thing with an
+ * in-process signer.
+ */
+export declare function buildPolicyEnvelope(args: {
+    signPayload: (payload: Uint8Array) => {
+        signature: string;
+        rootPubkey: string;
+    };
+    policy: Policy;
+    sessionPubkey: string;
+    issuedAt?: Date;
+    expiresAt?: Date | null;
+    revoker?: string | null;
+}): PolicyEnvelope;
 export type EnvelopeCheck = {
     ok: true;
     envelope: PolicyEnvelope;

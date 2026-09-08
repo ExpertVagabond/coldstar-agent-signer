@@ -12,8 +12,9 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { Keypair } from "@solana/web3.js";
 import { encryptRootKey, decryptRootKey, wipe } from "../policy/keyfile.js";
+import { decryptLegacyRootKey, isLegacyKeyContainer } from "../policy/legacyKeyfile.js";
 import { checkAirGap, describeAirGap } from "../policy/airgap.js";
-import { readNewPassphrase } from "./passphrase.js";
+import { readNewPassphrase, readPassphrase } from "./passphrase.js";
 function arg(name) {
     const i = process.argv.indexOf(`--${name}`);
     return i >= 0 ? process.argv[i + 1] : undefined;
@@ -40,11 +41,29 @@ try {
 catch (e) {
     fail(`cannot read ${inPath}: ${e.message}`);
 }
-if (!Array.isArray(raw))
-    fail(`${inPath} is not a solana-keygen key file (expected a JSON byte array)`);
-const secret = Uint8Array.from(raw);
-if (secret.length !== 64 && secret.length !== 32)
-    fail(`expected 32 or 64 bytes, got ${secret.length}`);
+// Two kinds of input: a plaintext solana-keygen array, or an older Coldstar
+// container that needs upgrading to the current format. The second case is the
+// migration Coldstar's own wallet performs on first open.
+let secret;
+if (isLegacyKeyContainer(raw)) {
+    process.stderr.write(`${inPath} is a legacy Coldstar key file; it will be re-encrypted in the current format.\n`);
+    const oldPass = await readPassphrase("Existing passphrase: ");
+    process.stderr.write("deriving the key (Argon2id, libsodium parameters)…\n");
+    try {
+        secret = decryptLegacyRootKey(raw, oldPass);
+    }
+    catch (e) {
+        fail(e.message);
+    }
+}
+else if (Array.isArray(raw)) {
+    secret = Uint8Array.from(raw);
+    if (secret.length !== 64 && secret.length !== 32)
+        fail(`expected 32 or 64 bytes, got ${secret.length}`);
+}
+else {
+    fail(`${inPath} is neither a solana-keygen key file nor a Coldstar key container`);
+}
 const keypair = secret.length === 64 ? Keypair.fromSecretKey(secret) : Keypair.fromSeed(secret);
 process.stderr.write(`root public key: ${keypair.publicKey.toBase58()}\n`);
 let passphrase;
@@ -64,6 +83,6 @@ if (!roundTrips)
     fail("internal error: the encrypted key did not round-trip; nothing was written");
 writeFileSync(outPath, JSON.stringify(container, null, 2) + "\n", { mode: 0o600 });
 process.stderr.write(`wrote ${outPath} (mode 0600), verified it decrypts back to ${keypair.publicKey.toBase58()}\n\n` +
-    `Now destroy the plaintext original:\n  rm -P ${inPath}\n` +
+    `Keep the original until you have confirmed the new file works, then destroy it:\n  rm -P ${inPath}\n` +
     "If you lose the passphrase the key is gone. There is no recovery, by design.\n");
 //# sourceMappingURL=encryptKey.js.map

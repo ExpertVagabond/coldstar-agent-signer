@@ -16,9 +16,12 @@
 
 import { readFileSync } from "node:fs";
 import { Keypair } from "@solana/web3.js";
-import { signPolicyEnvelope, parsePolicy } from "../policy/envelope.js";
+import { signPolicyEnvelope, buildPolicyEnvelope, parsePolicy } from "../policy/envelope.js";
+import { findRustSigner, rustSignerCapabilities, signWithRustSigner } from "../policy/rustSigner.js";
 import { checkAirGap, describeAirGap } from "../policy/airgap.js";
-import { decryptRootKey, isEncryptedKeyContainer, wipe } from "../policy/keyfile.js";
+import { decryptRootKey, isEncryptedKeyContainer, normalizeKeyContainer, wipe } from "../policy/keyfile.js";
+import { decryptLegacyRootKey, isLegacyKeyContainer } from "../policy/legacyKeyfile.js";
+import { wrapPolicyEnvelope } from "../policy/wireEnvelope.js";
 import { readPassphrase } from "./passphrase.js";
 
 function arg(name: string): string | undefined {
@@ -72,20 +75,51 @@ try {
   fail(`cannot read ${rootPath}: ${(e as Error).message}`);
 }
 
-let root: Keypair;
+let root: Keypair | undefined;
 let seed: Uint8Array | undefined;
-if (isEncryptedKeyContainer(rootRaw)) {
-  const passphrase = await readPassphrase(`Passphrase for ${rootRaw.public_key ?? rootPath}: `);
+/** Set when Coldstar's Rust signer will do the signing instead of this process. */
+let delegate: { bin: string; containerJson: string; passphrase: string } | undefined;
+const rootContainer = normalizeKeyContainer(rootRaw);
+const rustBin = process.argv.includes("--no-rust-signer") ? null : findRustSigner();
+
+if (isEncryptedKeyContainer(rootContainer) && rustBin) {
+  // The better path. secure_buffer.rs locks the key's pages against swap and
+  // zeroizes on drop, which nothing in Node can do.
+  const caps = rustSignerCapabilities(rustBin);
+  process.stderr.write(
+    `using Coldstar's signer at ${rustBin}` +
+      (caps.memoryLocking ? " (memory locking available)" : " (WARNING: this machine cannot lock memory)") +
+      "\n",
+  );
+  const passphrase = await readPassphrase(`Passphrase for ${rootContainer.public_key ?? rootPath}: `);
+  delegate = { bin: rustBin, containerJson: JSON.stringify(rootContainer), passphrase };
+} else if (isEncryptedKeyContainer(rootContainer)) {
+  const passphrase = await readPassphrase(`Passphrase for ${rootContainer.public_key ?? rootPath}: `);
   process.stderr.write("deriving the key (Argon2id, 64 MB)…\n");
   try {
-    seed = decryptRootKey(rootRaw, passphrase);
+    seed = decryptRootKey(rootContainer, passphrase);
   } catch (e) {
     fail((e as Error).message);
   }
   root = Keypair.fromSeed(seed as Uint8Array);
-  if (rootRaw.public_key && rootRaw.public_key !== root.publicKey.toBase58()) {
+  if (rootContainer.public_key && rootContainer.public_key !== root.publicKey.toBase58()) {
     fail("the container's public_key does not match the key inside it");
   }
+} else if (isLegacyKeyContainer(rootRaw)) {
+  // An older Coldstar wallet that has not been opened by a recent build. Read it
+  // rather than tell a Coldstar user their own key file is not a key file.
+  const passphrase = await readPassphrase(`Passphrase for ${rootPath}: `);
+  process.stderr.write("legacy Coldstar key file; deriving the key (Argon2id, libsodium parameters)…\n");
+  try {
+    seed = decryptLegacyRootKey(rootRaw, passphrase);
+  } catch (e) {
+    fail((e as Error).message);
+  }
+  root = Keypair.fromSeed(seed as Uint8Array);
+  process.stderr.write(
+    "NOTE: this key file is in Coldstar's older format. Convert it with\n" +
+      `      \`coldstar-encrypt-key --in ${rootPath} --out <new file>\`\n`,
+  );
 } else if (Array.isArray(rootRaw)) {
   process.stderr.write(
     "WARNING: this root key is stored in PLAINTEXT. Encrypt it with `coldstar-encrypt-key`;\n" +
@@ -100,9 +134,37 @@ for (const k of ["allowRecipients", "blockRecipients"] as const) {
   if (policy[k].some((v) => v.startsWith("<") || v.startsWith("$"))) fail(`policy.${k} still has a placeholder`);
 }
 
-const envelope = signPolicyEnvelope({ rootSecretKey: root.secretKey, policy, sessionPubkey, expiresAt, ...(revoker ? { revoker } : {}) });
+const envelope = delegate
+  ? buildPolicyEnvelope({
+      signPayload: (payload) => {
+        const { signature, publicKey } = signWithRustSigner(
+          delegate!.bin,
+          delegate!.containerJson,
+          delegate!.passphrase,
+          payload,
+        );
+        return { signature, rootPubkey: publicKey };
+      },
+      policy,
+      sessionPubkey,
+      expiresAt,
+      ...(revoker ? { revoker } : {}),
+    })
+  : signPolicyEnvelope({ rootSecretKey: root!.secretKey, policy, sessionPubkey, expiresAt, ...(revoker ? { revoker } : {}) });
+
+if (delegate && rootContainer && (rootContainer as { public_key?: string }).public_key) {
+  // The Rust signer reports which key it used; check it is the one claimed.
+  const claimed = (rootContainer as { public_key?: string }).public_key;
+  if (claimed !== envelope.rootPubkey) fail("the container's public_key does not match the key inside it");
+}
 wipe(seed); // the signature is made; the key material has no further use here
-process.stdout.write(JSON.stringify(envelope, null, 2) + "\n");
+if (process.argv.includes("--wire")) {
+  // Coldstar's air-gap wrapper, so the grant can cross the gap by the same route
+  // a transaction does, including as a QR code.
+  process.stdout.write(wrapPolicyEnvelope(envelope) + "\n");
+} else {
+  process.stdout.write(JSON.stringify(envelope, null, 2) + "\n");
+}
 process.stderr.write(
   `signed by root ${envelope.rootPubkey} for session ${sessionPubkey}` +
     (expiresAt ? `, expires ${envelope.expiresAt}` : ", no expiry (consider --expires)") +

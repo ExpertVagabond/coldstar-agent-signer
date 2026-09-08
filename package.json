@@ -1,6 +1,6 @@
 {
   "name": "coldstar-agent-signer",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "mcpName": "io.github.expertvagabond/coldstar-agent-signer",
   "description": "Agent-safe signing for Coldstar — policy-gated auto-sign / air-gapped escalation / reject. The agent never holds the root key.",
   "author": "Matthew Karsten <matthewkarstenconnects@gmail.com>",
@@ -65,6 +65,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "@noble/ciphers": "^2.4.0",
     "@noble/hashes": "^1.4.0",
     "bs58": "^6.0.0",
     "zod": "^3.25.0"

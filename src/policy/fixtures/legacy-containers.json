@@ -1,0 +1,39 @@
+{
+  "_comment": [
+    "Legacy Coldstar key containers, produced by Coldstar's OWN SecureWalletHandler",
+    "(devsyrem/coldstar src/secure_memory.py at 5b75d94), NOT by any code in this repo.",
+    "They exist so legacyKeyfile.ts is tested against the real writer. Regenerate with",
+    "scratchpad/gen_legacy_vectors.py against a checkout of devsyrem/coldstar.",
+    "The keys are throwaway and hold nothing."
+  ],
+  "vectors": [
+    {
+      "passphrase": "Correct-Horse-Battery-9",
+      "expected_public_key": "3Pf6iVp73nPs8QK5JWpoXEqU77gQ2bgfneC4o67yzyjr",
+      "expected_seed_hex": "6ab18c5aaa91b56c9748b33471bc6c875f549c513f02bec1b7a8f16512ef6a2a",
+      "container": {
+        "version": 2,
+        "algo": "argon2id_xsalsa20poly1305",
+        "opslimit": 3,
+        "memlimit": 67108864,
+        "salt": "045a946d7c353622bbd3848cef1badc9",
+        "nonce": "64a23016f979c183658c89cc2ab979160e188154383ed5df",
+        "ciphertext": "78c3d2c269f7248b70a9e4309b896bc8bad20fdf4e4a4ae7f011bb54bf31fe07d9b6fd2b288f95dafb961d59085e1c915805c641c1ccac0b9f5bb19d0832f805c9402e1e1435267226835226a685057b"
+      }
+    },
+    {
+      "passphrase": "Correct-Horse-Battery-9",
+      "expected_public_key": "4jUK4BtWFmBRfA1eyyMsoJN4bLiSP6bxHu3FLsmGwUei",
+      "expected_seed_hex": "6954e06d4ba8f524a9f4340e008355b3716e4da4b49e1adaba7eba6e5d94212a",
+      "container": {
+        "version": 2,
+        "algo": "argon2id_xsalsa20poly1305",
+        "opslimit": 3,
+        "memlimit": 67108864,
+        "salt": "6beae0f66cd8af9cdf338410c3c46529",
+        "nonce": "16d26e90fbf959a474d9319066006b01b3523f7a0d644afd",
+        "ciphertext": "8aa04f7509b9e67000c96d0e863d1bbc6d9c91ac64c7726c8c29a805a3ace27aa8fa64f4ac0aa53a432fed262e8caa3a205cf51e6ebc3300f289205d0bc7009ec6ddd6c484cd32c5a11b38dcb4127df5"
+      }
+    }
+  ]
+}

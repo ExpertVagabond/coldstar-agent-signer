@@ -25,11 +25,77 @@ const NONCE_SIZE = 12;
 const SALT_SIZE = 32;
 const SEED_SIZE = 32;
 const TAG_SIZE = 16;
+/**
+ * Coldstar's passphrase rules, from `validate_password_strength` in
+ * `src/security_validation.py`. Matched deliberately rather than improved on:
+ * two tools guarding one key should not disagree about what protects it, and a
+ * key file moves between them.
+ */
+export const MIN_PASSPHRASE_LENGTH = 12;
+const COMMON_PASSPHRASES = new Set([
+    "password", "12345678", "123456789", "1234567890",
+    "qwerty", "abc123", "password123", "admin",
+    "letmein", "welcome", "monkey", "1234",
+    "password1", "123456", "qwerty123",
+]);
+/** Returns null when acceptable, or the reason it is not. */
+export function passphraseWeakness(passphrase) {
+    if (!passphrase)
+        return "passphrase cannot be empty";
+    if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
+        return `passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters long`;
+    }
+    if (!/[A-Z]/.test(passphrase))
+        return "passphrase must contain at least one uppercase letter";
+    if (!/[a-z]/.test(passphrase))
+        return "passphrase must contain at least one lowercase letter";
+    if (!/[0-9]/.test(passphrase))
+        return "passphrase must contain at least one number";
+    if (COMMON_PASSPHRASES.has(passphrase.toLowerCase())) {
+        return "passphrase is too common; choose a stronger one";
+    }
+    return null;
+}
+/**
+ * Coerce a container into the shape this module reads.
+ *
+ * Coldstar's `_normalize_container_format` exists because containers are found
+ * in the wild with `salt`, `nonce`, `ciphertext` and `public_key` as JSON arrays
+ * of bytes rather than encoded strings. Rejecting those would mean telling a
+ * Coldstar user their own key file is not a key file.
+ */
+export function normalizeKeyContainer(raw) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw))
+        return raw;
+    const c = { ...raw };
+    if (c.version === undefined)
+        c.version = 1;
+    for (const field of ["salt", "nonce", "ciphertext"]) {
+        const v = c[field];
+        if (Array.isArray(v))
+            c[field] = Buffer.from(Uint8Array.from(v)).toString("base64");
+    }
+    if (Array.isArray(c.public_key)) {
+        c.public_key = base58Encode(Uint8Array.from(c.public_key));
+    }
+    return c;
+}
 export function isEncryptedKeyContainer(v) {
     if (!v || typeof v !== "object" || Array.isArray(v))
         return false;
     const c = v;
-    return typeof c.salt === "string" && typeof c.nonce === "string" && typeof c.ciphertext === "string";
+    if (typeof c.salt !== "string" || typeof c.nonce !== "string" || typeof c.ciphertext !== "string") {
+        return false;
+    }
+    // A legacy libsodium container ALSO has three string fields under these names,
+    // so "has the right field names" is not a discriminator. Coldstar tells them
+    // apart by `algo`, and so do we. Getting this wrong sends an old key file to
+    // the wrong decryptor, which is how the legacy branch became unreachable once.
+    if (typeof c.algo === "string" && c.algo.endsWith("_xsalsa20poly1305"))
+        return false;
+    // Belt and braces: the sizes are fixed and differ from libsodium's, and hex
+    // decoded as base64 does not land on them.
+    return (Buffer.from(c.salt, "base64").length === SALT_SIZE && Buffer.from(c.nonce, "base64").length === NONCE_SIZE);
 }
 function deriveKey(passphrase, salt) {
     return argon2id(new TextEncoder().encode(passphrase), salt, {
@@ -53,8 +119,9 @@ export function encryptRootKey(secret, passphrase, publicKeyBase58) {
     if (secret.length !== SEED_SIZE && secret.length !== 64) {
         throw new Error(`root key must be 32 or 64 bytes, got ${secret.length}`);
     }
-    if (passphrase.length < 8)
-        throw new Error("passphrase must be at least 8 characters");
+    const weak = passphraseWeakness(passphrase);
+    if (weak)
+        throw new Error(weak);
     const seed = secret.slice(0, SEED_SIZE);
     const salt = randomBytes(SALT_SIZE);
     const nonce = randomBytes(NONCE_SIZE);
@@ -125,6 +192,22 @@ export function containerMatchesPublicKey(container, publicKey) {
     return claimed.length === publicKey.length && timingSafeEqual(Buffer.from(claimed), Buffer.from(publicKey));
 }
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+function base58Encode(bytes) {
+    let n = 0n;
+    for (const b of bytes)
+        n = (n << 8n) | BigInt(b);
+    let out = "";
+    while (n > 0n) {
+        out = ALPHABET[Number(n % 58n)] + out;
+        n /= 58n;
+    }
+    for (const b of bytes) {
+        if (b !== 0)
+            break;
+        out = "1" + out;
+    }
+    return out;
+}
 function base58Decode(s) {
     let n = 0n;
     for (const c of s) {

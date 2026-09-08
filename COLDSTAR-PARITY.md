@@ -42,9 +42,12 @@ silently different KDF cannot pass by agreeing with itself.
 Both also refuse to read a root key on a machine with a live network interface,
 and both treat that check as a negative signal rather than proof.
 
-## Where they diverge
+## Where they diverged, and what is now closed
 
-### 1. Memory protection is real in Coldstar and absent here
+All five are closed. Each is verified against Coldstar's own code or its own
+output, never against a reimplementation of it.
+
+### 1. Memory protection — CLOSED by delegation
 
 `secure_signer/src/secure_buffer.rs` locks pages with `mlock` and zeroizes on
 drop, including on panic. `crypto.rs` routes every plaintext-key path through
@@ -54,18 +57,30 @@ The agent signer decrypts into an ordinary JavaScript or Python heap. It fills
 the buffer with zeros afterwards, which does not reach copies the runtime has
 already made, and nothing prevents those pages reaching swap.
 
-This is the largest honest gap. The website's threat model describes Coldstar,
-where the claim is true; it is not true of this package's own signing tools.
+`coldstar-sign-policy` now hands the work to that binary when it is installed:
+`src/policy/rustSigner.ts` finds `solana-signer`, and the plaintext key then
+never exists in this process at all. The container and the passphrase go over
+stdin as one JSON line, never as arguments, because `solana-signer sign
+--passphrase …` would put the passphrase in `ps` output and shell history.
 
-### 2. A legacy Coldstar wallet cannot be opened here
+Verified: the delegated signature is byte-identical to the in-process one over
+the same payload, and the binary reports `mlock_supported: true`. Point it at a
+build with `COLDSTAR_SIGNER_BIN`, or put it on `PATH`. `--no-rust-signer` forces
+the pure path, which remains the default when the binary is absent, because it
+is the reason the air-gapped machine needs neither Node nor a package
+installer.
+
+### 2. Legacy Coldstar wallets — CLOSED
 
 Coldstar has an older container written by PyNaCl, and `wallet.py`
 (`load_encrypted_container`) still reads it, converts it to the Rust format and
 rewrites the file, keeping a `.pynacl.backup`. So a wallet that has been opened
 by a recent Coldstar build is already in the format above.
 
-A wallet that has **not** been opened since is still in the old shape, and this
-package rejects it outright:
+A wallet that has **not** been opened since is still in the old shape. This
+package used to reject it outright; `src/policy/legacyKeyfile.ts` now reads it,
+and `coldstar-encrypt-key` converts it to the current format the way Coldstar's
+own wallet does. The formats:
 
 | | Legacy PyNaCl | Rust / current |
 | --- | --- | --- |
@@ -80,18 +95,29 @@ Note the parallelism: libsodium fixes Argon2id at one lane, so the two KDFs do
 not produce the same key even with matching cost parameters. Reading the legacy
 format needs its own path, not a parameter tweak.
 
+The fixtures in `src/policy/fixtures/legacy-containers.json` were produced by
+Coldstar's own `SecureWalletHandler`, not by anything here. A reader tested only
+against its own writer passes just as happily when both have drifted away from
+the format a real wallet is in.
+
+One bug this caught, worth recording. A legacy container also has `salt`, `nonce`
+and `ciphertext` as strings, so `isEncryptedKeyContainer` claimed it and the
+legacy branch was unreachable. The unit tests missed it and an end-to-end run
+found it. The type guard now discriminates on `algo` and on the field sizes,
+which differ (16 and 24 bytes against 32 and 12).
+
 There is also an older plaintext byte-array format. Coldstar refuses it and
 tells the user to make a new encrypted wallet. This package accepts it with a
 warning, which is more permissive than Coldstar is.
 
-### 3. Array-form container fields are rejected
+### 3. Array-form container fields — CLOSED
 
 `_normalize_container_format` in `wallet.py` exists because containers are found
 in the wild with `salt`, `nonce`, `ciphertext` and `public_key` as JSON arrays
-of integers rather than encoded strings. `isEncryptedKeyContainer` requires
-strings, so such a file is reported as neither a container nor a key file.
+of integers rather than encoded strings. `normalizeKeyContainer` now performs the same coercion before the
+format checks, so those files load.
 
-### 4. The policy envelope does not ride Coldstar's wire format
+### 4. The policy envelope's wire format — CLOSED
 
 Coldstar's air-gap envelope (`src/qr.py`, `build_envelope`) is:
 
@@ -103,15 +129,25 @@ with `unsigned_transaction` as the other type, and the `mobile/` app in the same
 repository matches it exactly. The policy envelope this package emits is a
 different JSON object that crosses the gap as a file.
 
-The consequence is concrete: the Coldstar mobile app cannot carry an agent
-grant across the gap, even though carrying things across the gap is exactly what
-it is for.
+`coldstar-sign-policy --wire` now emits the grant inside that wrapper, as a
+third type, `policy_envelope`, alongside the two transaction types. The output
+is checked byte for byte against Coldstar's own `build_envelope`.
 
-### 5. Passphrase rules differ on the same key
+One step remains and it is upstream, not here: the `mobile/` app has to learn
+the new type before it will carry a grant. The wire format no longer stands in
+the way.
 
-`security_validation.py` has `validate_password_strength`. This package requires
-eight characters. Two tools guarding one key should not disagree about what
-protects it.
+### 5. Passphrase rules — CLOSED
+
+`security_validation.py` has `validate_password_strength`. This package required
+eight characters. It now applies Coldstar's rules exactly: twelve characters,
+upper, lower, a digit, and not one of the common passwords Coldstar lists.
+
+Matched rather than improved on. Composition rules are not what modern guidance
+recommends, but two tools guarding one key must not disagree about what protects
+it, and the key file moves between them. The rules apply when a passphrase is
+SET, never when an existing file is opened, so tightening them cannot lock
+anyone out of a key they already have.
 
 ## Deliberately not shared
 
@@ -120,14 +156,16 @@ and the token metadata fetchers belong to a wallet application, not to a signing
 library that an agent imports. Coldstar should keep them and this package should
 not grow them.
 
-## The call
+## What is left
 
-Adopt Coldstar's formats completely, and use its Rust signer when it is present.
+Two things, both upstream in `devsyrem/coldstar` rather than here:
 
-The format is the product boundary; the implementation language is not. A pure
-TypeScript and Python implementation has to stay, because it is the reason the
-air-gapped path works on a machine with neither Node nor a package installer.
-But it should read every container Coldstar can produce, put the policy envelope
-inside Coldstar's own wire envelope so the existing mobile app can carry it,
-share the passphrase rules, and hand key material to the Rust `SecureBuffer`
-whenever the library is available rather than reimplementing around it.
+1. The `mobile/` app does not know the `policy_envelope` type, so it cannot yet
+   carry a grant across the gap even though the wire format now allows it.
+2. `solana-signer` cannot read a legacy libsodium container, so the delegated
+   signing path only applies to current ones. A legacy wallet is read in
+   process, or converted first with `coldstar-encrypt-key`.
+
+The principle to keep: the format is the product boundary, the implementation
+language is not. The pure TypeScript and Python path stays, because it is the
+reason the air-gapped machine needs neither Node nor a package installer.

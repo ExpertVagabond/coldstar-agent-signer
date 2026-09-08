@@ -54,7 +54,10 @@ raw tx ──(project + parseTx, fail-closed)──▶ TxIntent ──(evaluate)
 | `src/policy/crossLanguage.test.ts` | ✅ 7 tests: the Python output verifies in TypeScript, and both sign identical bytes |
 | `src/policy/revocation.ts` | ✅ on-chain revocation: signed memo marker, `RevocationChecker`, fail-closed |
 | `src/policy/airgap.ts` | ✅ the cold-side tool refuses to read the root key on a networked machine |
-| `src/policy/keyfile.ts` | ✅ 17 tests: the root is Argon2id + AES-256-GCM at rest, and opens in the Python tool |
+| `src/policy/keyfile.ts` | ✅ the root is Argon2id + AES-256-GCM at rest, and opens in the Python tool |
+| `src/policy/legacyKeyfile.ts` | ✅ 11 tests against containers written by Coldstar's own encryptor |
+| `src/policy/wireEnvelope.ts` | ✅ 7 tests: byte-identical to Coldstar's `build_envelope` |
+| `src/policy/rustSigner.ts` | ✅ delegates to Coldstar's `mlock`ing signer when it is installed |
 | `THREAT-MODEL.md` | ✅ what this protects, what it does not, and how to build an air gap that earns the name |
 | `src/cli/revoke.ts` | ✅ `coldstar-revoke` — cancel a grant early |
 | `src/policy/revocation.test.ts` | ✅ 13 tests incl. forged-marker and unreachable-chain cases |
@@ -88,6 +91,54 @@ Argon2id (v1.3, m = 64 MiB, t = 3, p = 4) turns the passphrase and a fresh 32-by
 The passphrase is never an argument, because arguments are visible in `ps` and land in shell history. `coldstar-sign-policy` prompts with echo off at a terminal, reads one line when stdin is a pipe, and honours `COLDSTAR_PASSPHRASE` while warning that a variable is inherited by every child process. A wrong passphrase fails the GCM tag and is reported as such; nothing is written to stdout that could be mistaken for a good envelope.
 
 A plaintext root still works, so nobody's setup breaks on upgrade, but it prints a warning every time. Lose the passphrase and the key is gone. That is the design, not a gap in it.
+
+### Reading a wallet Coldstar already made
+
+This package is meant to be Coldstar with an agent-usable interface, not a second
+product with its own file formats. `COLDSTAR-PARITY.md` records exactly where the
+two agree and where they do not.
+
+`coldstar-sign-policy --root` accepts any key file Coldstar can produce: the
+current container, the older libsodium one from Coldstar's PyNaCl era, and
+containers whose fields are byte arrays rather than encoded strings. Point
+`coldstar-encrypt-key` at an old one to convert it, which is the same migration
+Coldstar's own wallet performs when it opens a legacy wallet.
+
+Passphrase rules are Coldstar's, not ours: twelve characters, upper, lower and a
+digit. They apply when a passphrase is set, never when an existing file is
+opened, so a key you already have cannot be locked away by a rule change.
+
+### Letting Coldstar's signer hold the key
+
+Node cannot lock memory. Coldstar's Rust signer can, and does: it keeps the
+decrypted key in an `mlock`ed buffer that is zeroized on drop, including on
+panic. When the `solana-signer` binary is present, `coldstar-sign-policy` hands
+it the signing and the plaintext key never enters this process.
+
+```bash
+export COLDSTAR_SIGNER_BIN=/path/to/coldstar/secure_signer/target/release/solana-signer
+coldstar-sign-policy --root root.coldstar.json …    # says which signer it used
+```
+
+It is also found on `PATH`. The container and passphrase go to it over stdin as
+one JSON line, never as arguments, since arguments appear in `ps` and shell
+history. `--no-rust-signer` forces the in-process path, which is the default when
+the binary is absent because it is why the air-gapped machine needs neither Node
+nor a package installer.
+
+### Crossing the gap as a QR code
+
+Everything Coldstar moves across the gap is wrapped the same way, and its phone
+app decodes exactly that wrapper. `--wire` puts the grant in it:
+
+```bash
+coldstar-sign-policy … --wire > grant.json
+# {"type":"policy_envelope","version":"1.0","data":"<base64 envelope>"}
+```
+
+The output is checked byte for byte against Coldstar's own `build_envelope`. The
+app itself does not know the `policy_envelope` type yet, so teaching it that is
+the remaining step, upstream.
 
 ### Revoking a grant early
 

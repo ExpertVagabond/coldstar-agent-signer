@@ -149,14 +149,42 @@ export function signPolicyEnvelope(args: {
   /** Hot key allowed to revoke this grant on chain. Emits a version 2 envelope. */
   revoker?: string | null;
 }): PolicyEnvelope {
+  const kp = nacl.sign.keyPair.fromSecretKey(args.rootSecretKey);
+  const { rootSecretKey: _unused, ...rest } = args;
+  return buildPolicyEnvelope({
+    ...rest,
+    signPayload: (payload) => ({
+      signature: bs58.encode(nacl.sign.detached(payload, kp.secretKey)),
+      rootPubkey: bs58.encode(kp.publicKey),
+    }),
+  });
+}
+
+/**
+ * Build an envelope without holding the root secret key here.
+ *
+ * The caller supplies a function that signs the canonical payload and says which
+ * public key it used. That lets the signing happen somewhere better than this
+ * process: Coldstar's Rust signer holds the key in `mlock`ed memory that is
+ * zeroized on drop, so with that path the plaintext key never exists in the
+ * JavaScript heap at all. `signPolicyEnvelope` above is the same thing with an
+ * in-process signer.
+ */
+export function buildPolicyEnvelope(args: {
+  signPayload: (payload: Uint8Array) => { signature: string; rootPubkey: string };
+  policy: Policy;
+  sessionPubkey: string;
+  issuedAt?: Date;
+  expiresAt?: Date | null;
+  revoker?: string | null;
+}): PolicyEnvelope {
   const policy = parsePolicy(args.policy);
   const issuedAt = (args.issuedAt ?? new Date()).toISOString();
   const expiresAt = args.expiresAt === undefined ? null : args.expiresAt === null ? null : args.expiresAt.toISOString();
-  const kp = nacl.sign.keyPair.fromSecretKey(args.rootSecretKey);
   const version: 1 | 2 = args.revoker === undefined ? 1 : 2;
   const revoker = args.revoker ?? null;
   const payload = envelopePayload({ version, policy, sessionPubkey: args.sessionPubkey, issuedAt, expiresAt, revoker });
-  const sig = nacl.sign.detached(payload, kp.secretKey);
+  const { signature, rootPubkey } = args.signPayload(payload);
   return {
     version,
     policy,
@@ -164,8 +192,8 @@ export function signPolicyEnvelope(args: {
     issuedAt,
     expiresAt,
     ...(version === 2 ? { revoker } : {}),
-    rootPubkey: bs58.encode(kp.publicKey),
-    signature: bs58.encode(sig),
+    rootPubkey,
+    signature,
   };
 }
 

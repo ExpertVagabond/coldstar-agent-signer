@@ -155,7 +155,7 @@ describe("encrypted root keys across the two signers", () => {
   // changed Argon2 parameter, a tag on the wrong end, a seed stored as a full
   // keypair. Any of those still round-trips inside one language and fails
   // across the pair, which is exactly what this checks.
-  const PASS = "a-strong-test-passphrase";
+  const PASS = "A-Strong-Test-Passphrase-1";
 
   it("Python opens a container written by TypeScript and signs a valid envelope", () => {
     if (!python) return; // no interpreter here; the TS-only tests still ran
@@ -202,7 +202,7 @@ describe("encrypted root keys across the two signers", () => {
       stdout = execFileSync(
         python,
         [TOOL, "--root", keyPath, "--policy", policyPath, "--session", session.publicKey.toBase58(), "--allow-network"],
-        { input: "definitely-not-the-passphrase\n", encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] },
+        { input: "Definitely-Not-It-9\n", encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] },
       );
     } catch (e) {
       const err = e as { stderr?: string; stdout?: string; status?: number };

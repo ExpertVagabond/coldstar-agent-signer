@@ -16,7 +16,7 @@ import {
 
 // Argon2id is deliberately slow (64 MB, t=3). Each derivation costs ~100ms, and
 // several tests here do two. Keep the count of derivations low on purpose.
-const PASS = "correct horse battery staple";
+const PASS = "Correct-Horse-Battery-9";
 
 describe("encrypted root key container", () => {
   it("round-trips a 64-byte solana-keygen key through the seed", () => {
@@ -42,7 +42,7 @@ describe("encrypted root key container", () => {
 
   it("says 'wrong passphrase' rather than returning garbage", () => {
     const container = encryptRootKey(Keypair.generate().secretKey, PASS);
-    expect(() => decryptRootKey(container, "wrong passphrase")).toThrow(/wrong passphrase/i);
+    expect(() => decryptRootKey(container, "Wrong-Passphrase-9")).toThrow(/wrong passphrase/i);
   });
 
   it("refuses a tampered ciphertext", () => {
@@ -63,14 +63,38 @@ describe("encrypted root key container", () => {
 
   it("rejects malformed containers instead of guessing", () => {
     const good = encryptRootKey(Keypair.generate().secretKey, PASS);
-    expect(() => decryptRootKey({ ...good, salt: Buffer.alloc(16).toString("base64") }, PASS)).toThrow(/salt must be 32 bytes/);
-    expect(() => decryptRootKey({ ...good, nonce: Buffer.alloc(8).toString("base64") }, PASS)).toThrow(/nonce must be 12 bytes/);
+    // A wrong salt or nonce size is now caught by the type guard, because those
+    // sizes are what tell this format apart from the legacy libsodium one. The
+    // rejection is earlier than it used to be, and says so differently.
+    expect(() => decryptRootKey({ ...good, salt: Buffer.alloc(16).toString("base64") }, PASS)).toThrow(
+      /not an encrypted key container/,
+    );
+    expect(() => decryptRootKey({ ...good, nonce: Buffer.alloc(8).toString("base64") }, PASS)).toThrow(
+      /not an encrypted key container/,
+    );
+    // Sizes that pass the guard still get the specific reason.
     expect(() => decryptRootKey({ ...good, ciphertext: Buffer.alloc(8).toString("base64") }, PASS)).toThrow(/too short/);
     expect(() => decryptRootKey({ ...good, version: 2 }, PASS)).toThrow(/unsupported key container version 2/);
   });
 
-  it("rejects a weak passphrase at encryption time, not at rest", () => {
-    expect(() => encryptRootKey(Keypair.generate().secretKey, "short")).toThrow(/at least 8 characters/);
+  it("applies Coldstar's passphrase rules at encryption time, not at rest", () => {
+    // Deliberately Coldstar's rules, not our own: a key file moves between the
+    // two tools, so they must not disagree about what protects it.
+    const key = Keypair.generate().secretKey;
+    expect(() => encryptRootKey(key, "Short-1")).toThrow(/at least 12 characters/);
+    expect(() => encryptRootKey(key, "alllowercase1")).toThrow(/uppercase/);
+    expect(() => encryptRootKey(key, "ALLUPPERCASE1")).toThrow(/lowercase/);
+    expect(() => encryptRootKey(key, "NoDigitsInHere")).toThrow(/number/);
+    expect(() => encryptRootKey(key, "")).toThrow(/empty/);
+  });
+
+  it("does not impose the rules on an EXISTING key file", () => {
+    // A container encrypted before the rules tightened must still open, or the
+    // rule change would lock people out of their own keys.
+    const kp = Keypair.generate();
+    const container = encryptRootKey(kp.secretKey, "Correct-Horse-Battery-9");
+    expect(Keypair.fromSeed(decryptRootKey(container, "Correct-Horse-Battery-9")).publicKey.toBase58())
+      .toBe(kp.publicKey.toBase58());
   });
 
   it("rejects a key of the wrong length", () => {

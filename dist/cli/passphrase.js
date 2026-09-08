@@ -4,6 +4,7 @@
 // history. Env var only when explicitly asked for, because it is inherited by
 // every child process. A terminal prompt with echo disabled otherwise.
 import { createInterface } from "node:readline";
+import { passphraseWeakness } from "../policy/keyfile.js";
 let pipedPassphrase;
 /** Read a passphrase. Prefers the terminal; falls back to a piped line. */
 export async function readPassphrase(prompt) {
@@ -83,8 +84,9 @@ export async function readPassphrase(prompt) {
 export async function readNewPassphrase() {
     const interactive = process.stdin.isTTY && !process.env.COLDSTAR_PASSPHRASE;
     const first = await readPassphrase("New passphrase for the root key: ");
-    if (first.length < 8)
-        throw new Error("passphrase must be at least 8 characters");
+    const weak = passphraseWeakness(first);
+    if (weak)
+        throw new Error(weak);
     if (!interactive)
         return first;
     const again = await readPassphrase("Confirm: ");

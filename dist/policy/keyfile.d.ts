@@ -10,6 +10,24 @@ export interface EncryptedKeyContainer {
     ciphertext: string;
     public_key?: string;
 }
+/**
+ * Coldstar's passphrase rules, from `validate_password_strength` in
+ * `src/security_validation.py`. Matched deliberately rather than improved on:
+ * two tools guarding one key should not disagree about what protects it, and a
+ * key file moves between them.
+ */
+export declare const MIN_PASSPHRASE_LENGTH = 12;
+/** Returns null when acceptable, or the reason it is not. */
+export declare function passphraseWeakness(passphrase: string): string | null;
+/**
+ * Coerce a container into the shape this module reads.
+ *
+ * Coldstar's `_normalize_container_format` exists because containers are found
+ * in the wild with `salt`, `nonce`, `ciphertext` and `public_key` as JSON arrays
+ * of bytes rather than encoded strings. Rejecting those would mean telling a
+ * Coldstar user their own key file is not a key file.
+ */
+export declare function normalizeKeyContainer(raw: unknown): unknown;
 export declare function isEncryptedKeyContainer(v: unknown): v is EncryptedKeyContainer;
 /** Overwrite a secret. Not a guarantee — a garbage collector may have copied it
  *  already — but it shortens the window, and saying otherwise would be a lie. */

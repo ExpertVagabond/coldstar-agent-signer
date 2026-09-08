@@ -5,6 +5,7 @@
 // every child process. A terminal prompt with echo disabled otherwise.
 
 import { createInterface } from "node:readline";
+import { passphraseWeakness } from "../policy/keyfile.js";
 
 let pipedPassphrase: string | undefined;
 
@@ -70,7 +71,8 @@ export async function readPassphrase(prompt: string): Promise<string> {
 export async function readNewPassphrase(): Promise<string> {
   const interactive = process.stdin.isTTY && !process.env.COLDSTAR_PASSPHRASE;
   const first = await readPassphrase("New passphrase for the root key: ");
-  if (first.length < 8) throw new Error("passphrase must be at least 8 characters");
+  const weak = passphraseWeakness(first);
+  if (weak) throw new Error(weak);
   if (!interactive) return first;
   const again = await readPassphrase("Confirm: ");
   if (first !== again) throw new Error("passphrases do not match");
