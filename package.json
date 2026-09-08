@@ -1,7 +1,7 @@
 {
   "name": "coldstar-agent-signer",
   "version": "0.7.0",
-  "mcpName": "io.github.expertvagabond/coldstar-agent-signer",
+  "mcpName": "io.github.ExpertVagabond/coldstar-agent-signer",
   "description": "Agent-safe signing for Coldstar — policy-gated auto-sign / air-gapped escalation / reject. The agent never holds the root key.",
   "author": "Matthew Karsten <matthewkarstenconnects@gmail.com>",
   "license": "MIT",
