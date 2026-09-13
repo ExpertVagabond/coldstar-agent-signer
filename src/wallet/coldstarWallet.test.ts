@@ -15,6 +15,7 @@ import {
   ColdstarEscalation,
   ColdstarRejected,
   InMemorySpendLedger,
+  type EscalationHandler,
 } from "./coldstarWallet.js";
 import { projectTransaction } from "./project.js";
 import type { Policy } from "../policy/schema.js";
@@ -110,16 +111,19 @@ describe("ColdstarWallet — the three decisions", () => {
 
   it("ESCALATE: a human approval handler can return a signed tx, and the spend is counted", async () => {
     const root = Keypair.generate();
-    const onEscalate = vi.fn(async <T extends Transaction | VersionedTransaction>(tx: T) => {
+    // vitest 4's Mock<T> flattens a generic signature, so count calls beside a plain typed handler.
+    const escalated = vi.fn();
+    const onEscalate: EscalationHandler = async (tx) => {
+      escalated(tx);
       (tx as Transaction).partialSign(root); // pretend the air-gapped device signed it
       return tx;
-    });
+    };
     const ledger = new InMemorySpendLedger();
     const w = wallet({ onEscalate, ledger });
     const tx = legacyTransfer(root.publicKey, 0.5, root.publicKey);
     tx.feePayer = root.publicKey;
     const out = await w.signTransaction(tx);
-    expect(onEscalate).toHaveBeenCalledTimes(1);
+    expect(escalated).toHaveBeenCalledTimes(1);
     expect(out.signatures[0]?.signature).not.toBeNull();
     // parseTx counts value leaving the fee payer; the ledger records what was actually signed,
     // whether by the session key or by the human on the cold side.

@@ -29,7 +29,7 @@ describe("encrypted root key container", () => {
     expect(Keypair.fromSeed(seed).publicKey.toBase58()).toBe(kp.publicKey.toBase58());
     // And the seed is the first half of the solana-keygen array, as Rust assumes.
     expect(Buffer.from(seed).equals(Buffer.from(kp.secretKey.slice(0, 32)))).toBe(true);
-  });
+  }, 30_000); // scrypt at production cost; ~6s on a loaded machine
 
   it("accepts a bare 32-byte seed as well", () => {
     const kp = Keypair.generate();
