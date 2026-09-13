@@ -18,7 +18,8 @@ import {
 // several tests here do two. Keep the count of derivations low on purpose.
 const PASS = "Correct-Horse-Battery-9";
 
-describe("encrypted root key container", () => {
+// scrypt runs at production cost here; 5-7s each on a loaded CI runner.
+describe("encrypted root key container", { timeout: 30_000 }, () => {
   it("round-trips a 64-byte solana-keygen key through the seed", () => {
     const kp = Keypair.generate();
     const container = encryptRootKey(kp.secretKey, PASS, kp.publicKey.toBase58());
@@ -29,7 +30,7 @@ describe("encrypted root key container", () => {
     expect(Keypair.fromSeed(seed).publicKey.toBase58()).toBe(kp.publicKey.toBase58());
     // And the seed is the first half of the solana-keygen array, as Rust assumes.
     expect(Buffer.from(seed).equals(Buffer.from(kp.secretKey.slice(0, 32)))).toBe(true);
-  }, 30_000); // scrypt at production cost; ~6s on a loaded machine
+  });
 
   it("accepts a bare 32-byte seed as well", () => {
     const kp = Keypair.generate();
