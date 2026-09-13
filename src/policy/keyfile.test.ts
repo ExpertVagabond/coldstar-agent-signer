@@ -18,8 +18,7 @@ import {
 // several tests here do two. Keep the count of derivations low on purpose.
 const PASS = "Correct-Horse-Battery-9";
 
-// scrypt runs at production cost here; 5-7s each on a loaded CI runner.
-describe("encrypted root key container", { timeout: 30_000 }, () => {
+describe("encrypted root key container", () => {
   it("round-trips a 64-byte solana-keygen key through the seed", () => {
     const kp = Keypair.generate();
     const container = encryptRootKey(kp.secretKey, PASS, kp.publicKey.toBase58());
