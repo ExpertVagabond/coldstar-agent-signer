@@ -5,62 +5,18 @@ export declare const PolicySchema: z.ZodObject<{
     limits: z.ZodObject<{
         perTxSol: z.ZodNumber;
         dailySol: z.ZodNumber;
-    }, "strip", z.ZodTypeAny, {
-        perTxSol: number;
-        dailySol: number;
-    }, {
-        perTxSol: number;
-        dailySol: number;
-    }>;
-    allowPrograms: z.ZodArray<z.ZodString, "many">;
-    allowRecipients: z.ZodArray<z.ZodString, "many">;
-    allowTokens: z.ZodArray<z.ZodString, "many">;
+    }, z.core.$strip>;
+    allowPrograms: z.ZodArray<z.ZodString>;
+    allowRecipients: z.ZodArray<z.ZodString>;
+    allowTokens: z.ZodArray<z.ZodString>;
     tokenLimits: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
         perTx: z.ZodOptional<z.ZodString>;
         daily: z.ZodOptional<z.ZodString>;
-    }, "strict", z.ZodTypeAny, {
-        perTx?: string | undefined;
-        daily?: string | undefined;
-    }, {
-        perTx?: string | undefined;
-        daily?: string | undefined;
-    }>>>;
-    allowTokenAccounts: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
-    blockRecipients: z.ZodArray<z.ZodString, "many">;
+    }, z.core.$strict>>>;
+    allowTokenAccounts: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    blockRecipients: z.ZodArray<z.ZodString>;
     escalateAboveSol: z.ZodNumber;
-}, "strict", z.ZodTypeAny, {
-    version: 1;
-    limits: {
-        perTxSol: number;
-        dailySol: number;
-    };
-    allowPrograms: string[];
-    allowRecipients: string[];
-    allowTokens: string[];
-    blockRecipients: string[];
-    escalateAboveSol: number;
-    tokenLimits?: Record<string, {
-        perTx?: string | undefined;
-        daily?: string | undefined;
-    }> | undefined;
-    allowTokenAccounts?: string[] | undefined;
-}, {
-    version: 1;
-    limits: {
-        perTxSol: number;
-        dailySol: number;
-    };
-    allowPrograms: string[];
-    allowRecipients: string[];
-    allowTokens: string[];
-    blockRecipients: string[];
-    escalateAboveSol: number;
-    tokenLimits?: Record<string, {
-        perTx?: string | undefined;
-        daily?: string | undefined;
-    }> | undefined;
-    allowTokenAccounts?: string[] | undefined;
-}>;
+}, z.core.$strict>;
 /** Parse and validate a bare policy. Throws with the first problem; never returns a partial policy. */
 export declare function parsePolicy(raw: unknown): Policy;
 export interface PolicyEnvelope {
